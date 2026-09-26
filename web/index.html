@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <title>Magic Circle Editor</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='52' font-size='58' fill='%23d6ba7d'%3E✧%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <script defer src="geometry.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <h1 class="brand">Magic Circle Editor</h1>
+    <div class="global-style" aria-label="全体の描画設定"><label>線色<input id="all-color" type="color" value="#000000" title="デフォルト設定のレイヤーに適用"></label><label>太さ<input id="all-width" type="number" min="0.25" max="20" step="0.25" value="1.5" title="デフォルト設定のレイヤーに適用"></label><label>背景色<input id="background-color" type="color" value="#ffffff"></label></div>
+    <div class="file-actions"><button id="open">開く</button><button id="save">データ保存</button><button id="export" class="primary">画像を書き出す</button></div>
+  </header>
+  <main class="workspace">
+    <aside class="layers-panel">
+      <div class="panel-heading"><h2>レイヤー</h2><span id="layer-count" class="badge"></span></div>
+      <div class="add-actions"><button id="add-shape">＋ 図形</button><button id="add-ruler">＋ 定規</button></div>
+      <div id="layers" class="layer-list"></div>
+      <div class="layer-tools"><button id="duplicate" title="選択レイヤーを複製">複製</button><button id="up" title="前面へ">↑</button><button id="down" title="背面へ">↓</button><button id="delete" title="選択レイヤーを削除">削除</button></div>
+      <div class="panel-bottom"><button id="new">新しく作る</button><button id="example">作例を読み込む</button></div>
+    </aside>
+    <section class="canvas-panel" aria-label="魔法陣プレビュー">
+      <div class="canvas-toolbar"><div class="canvas-title"><span id="selection-label" role="status"></span></div><div class="history"><button id="undo" title="元に戻す (Ctrl+Z)" aria-label="元に戻す">↶</button><button id="redo" title="やり直す (Ctrl+Shift+Z)" aria-label="やり直す">↷</button></div></div>
+      <div class="canvas-controls"><label class="toggle"><input id="guides" type="checkbox" checked> 分割ガイド</label><label class="toggle"><input id="highlight" type="checkbox" checked> 選択ハイライト</label><label class="toggle"><input id="center-guide" type="checkbox" checked> 中心ガイド</label><div class="snap-control"><label class="toggle" title="移動・回転中、中心・区画の境界・角度に吸着。Altで一時解除"><input id="snap" type="checkbox" checked> 自動補正</label><span id="snap-status" role="status"></span></div></div>
+      <div id="canvas-wrap"><svg id="canvas" viewBox="-400 -400 800 800" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="作成中の魔法陣"></svg></div>
+    </section>
+    <aside class="properties-panel"><div class="panel-heading"><h2>プロパティ</h2></div><div id="properties"></div></aside>
+  </main>
+  <input id="file-input" type="file" accept=".json,application/json" hidden>
+  <dialog id="export-dialog"><form method="dialog"><div class="panel-heading"><h2>画像を書き出す</h2><button aria-label="閉じる">×</button></div><p>ガイドを除いた魔法陣を書き出します。</p><label class="field">形式<select id="export-format"><option value="png">PNG 画像</option><option value="svg">SVG ベクター</option></select></label><label class="field">画像サイズ<select id="export-size"><option>1024</option><option selected>2048</option><option>4096</option></select></label><label class="toggle"><input id="transparent" type="checkbox" checked> 背景を透明にする</label><button type="button" id="download" class="primary">ダウンロード</button></form></dialog>
+  <dialog id="replace-dialog" aria-labelledby="replace-title" aria-describedby="replace-message"><form method="dialog"><div class="panel-heading"><h2 id="replace-title"></h2><button value="cancel" aria-label="閉じる">×</button></div><p id="replace-message"></p><p>残したい場合はキャンセルして、先に「データ保存」をしてください。</p><div class="dialog-actions"><button value="cancel" autofocus>キャンセル</button><button id="replace-confirm" value="proceed" class="primary"></button></div></form></dialog>
+  <div id="toast" role="status" hidden></div>
+</body>
+</html>

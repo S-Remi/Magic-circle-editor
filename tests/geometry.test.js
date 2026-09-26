@@ -1,0 +1,308 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import '../web/geometry.js';
+const { point, outline, renderArtwork, outlinePoints, fitToSector, snapPosition, snapAngle, createDocument, validateDocument } = globalThis.CircleGeometry;
+const layer = { id: 'test', strokeMode: 'custom', crescentDepth: 55, arcAngle: 90, hideOverlap: false, mergeOverlap: false, mode: 'shape', type: 'circle', divisions: 6, width: 1, x: 0, y: -100, rx: 50, ry: 30, rotation: 0, phase: 0, sides: 6, sharpness: 2, start: 0, end: 75, color: '#d6ba7d', clip: false, visible: true };
+test('circle points use a shared radius and apply translation and rotation', () => {
+  assert.deepEqual(point(layer, 0).map(Math.round), [0, -150]);
+  assert.deepEqual(point({ ...layer, rotation: 90 }, 0).map(Math.round), [50, -100]);
+});
+test('ruler range wraps across the top without closing', () => {
+  const path = outline({ ...layer, mode: 'ruler', type: 'curve', start: 75, end: 25 });
+  assert.ok(path.startsWith('M-50.000 -100.000'));
+  assert.ok(path.endsWith('L50.000 -100.000'));
+  assert.ok(!path.endsWith('Z'));
+  assert.equal(outline({ ...layer, mode: 'ruler', type: 'curve', start: 25, end: 25 }), '');
+});
+test('each repetition is clipped before rotation; hidden layers are omitted', () => {
+  const svg = renderArtwork([{ ...layer, clip: true }, { ...layer, visible: false }]);
+  assert.equal((svg.match(/clip-path=/g) || []).length, 6);
+  assert.equal((svg.match(/transform="rotate/g) || []).length, 6);
+  assert.ok(!renderArtwork([{ ...layer, clip: true, divisions: 1 }]).includes('clip-path='));
+});
+test('selection overlays have independent SVG definition IDs', () => {
+  const selected = { ...layer, clip: true };
+  const artwork = renderArtwork([selected]);
+  const highlight = renderArtwork([selected], 'selection-line');
+  const ids = [...(artwork + highlight).matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.ok(highlight.includes('href="#selection-line-outline-0"'));
+  assert.ok(highlight.includes('url(#selection-line-sector-0)'));
+});
+test('data round-trips and rejects unsafe or unbounded inputs', () => {
+  const data = { ...createDocument(), layers: [layer] };
+  assert.deepEqual(validateDocument(JSON.parse(JSON.stringify(data))), data);
+  for (const patch of [{ divisions: 999 }, { divisions: 1.5 }, { rx: NaN }, { color: 'url(https://invalid)' }, { type: '__proto__' }, { visible: 'yes' }]) {
+    assert.throws(() => validateDocument({ ...createDocument(), layers: [{ ...layer, ...patch }] }));
+  }
+  assert.throws(() => validateDocument({ ...createDocument(), layers: [layer, layer] }));
+  assert.throws(() => validateDocument({ version: 2, layers: [] }));
+});
+test('fit places circles tangent to sector edges including stroke width', () => {
+  const input = { ...layer, rx: 100, y: -160, width: 2 };
+  const result = fitToSector(input);
+  assert.equal(result.x, 0);
+  assert.deepEqual(Object.keys(result).sort(), ['x', 'y']);
+  assert.ok(Math.abs(result.y + 202.004) < .001);
+});
+test('fit keeps rendered outlines and strokes inside every sector and canvas', () => {
+  for (const type of ['circle', 'ellipse', 'leaf', 'drop', 'heart', 'crescent', 'fan', 'polygon', 'star', 'pointed']) {
+    for (const divisions of [1, 2, 3, 7, 64]) {
+      const input = { ...layer, type, divisions, rx: 6, ry: 10, rotation: 37, x: 230, y: 100, width: 4 };
+      const patch = fitToSector(input);
+      assert.ok(patch, `${type}/${divisions}`);
+      const fitted = { ...input, ...patch };
+      validateDocument({ ...createDocument(), layers: [fitted] });
+      assert.equal(fitted.rx, input.rx); assert.equal(fitted.ry, input.ry);
+      const half = Math.PI / divisions;
+      for (const [x, localY] of outlinePoints(fitted)) {
+        const y = localY + fitted.y;
+        assert.ok(Math.hypot(x, y) + fitted.width / 2 <= 400, `${type}/${divisions} canvas`);
+        if (divisions > 1) assert.ok(Math.abs(x) * Math.cos(half) + y * Math.sin(half) + fitted.width / 2 <= 0, `${type}/${divisions} sector`);
+      }
+    }
+  }
+});
+test('unfit dimensions report failure without shrinking or mutating the layer', () => {
+  const oversized = { ...layer, rx: 300, ry: 220, divisions: 12 };
+  const original = { ...oversized };
+  assert.equal(fitToSector(oversized), null);
+  assert.deepEqual(oversized, original);
+  assert.equal(fitToSector({ ...layer, type: 'ellipse', divisions: 64, rx: 380, ry: 1 }), null);
+});
+test('move snapping aligns center, sector axis and outline edge, leaving distant positions alone', () => {
+  assert.deepEqual(snapPosition(layer, 3, -4, 8), { x: 0, y: 0, label: '中心に吸着' });
+  assert.equal(snapPosition(layer, 3, -180, 8).x, 0);
+  const snapped = snapPosition(layer, 2, -104, 8);
+  assert.ok(Math.abs(snapped.y + 101.004) < .001);
+  const untouched = snapPosition(layer, 60, -250, 8);
+  assert.equal(untouched.x, 60); assert.equal(untouched.y, -250);
+});
+test('angle snapping handles division angles, 15 degree increments, negatives and wraparound', () => {
+  assert.equal(snapAngle(46, 7).angle, 45);
+  assert.ok(Math.abs(snapAngle(52, 7).angle - 360 / 7) < 1e-10);
+  assert.equal(snapAngle(-89, 6).angle, -90);
+  assert.equal(snapAngle(179, 6).angle, -180);
+  assert.equal(snapAngle(7, 6).snapped, false);
+});
+test('leaf has two tips and parabolic sides, with file support', () => {
+  const leaf = { ...layer, type: 'leaf', x: 0, y: 0, rx: 40, ry: 100 };
+  for (const [t, expected] of [[0, [0, -100]], [.25, [40, 0]], [.5, [0, 100]], [.75, [-40, 0]]]) {
+    point(leaf, t).forEach((value, i) => assert.ok(Math.abs(value - expected[i]) < 1e-9));
+  }
+  for (const t of [.1, .2, .6, .9]) {
+    const [x, y] = point(leaf, t);
+    assert.ok(Math.abs(Math.abs(x) / leaf.rx + (y / leaf.ry) ** 2 - 1) < 1e-9);
+  }
+  assert.ok(outline(leaf).endsWith(' Z'));
+  assert.deepEqual(validateDocument({ ...createDocument(), layers: [leaf] }).layers[0], leaf);
+});
+
+test('line rulers have exact endpoints, reversible ranges and no closing edge', () => {
+  const ruler = { ...layer, type: 'line', mode: 'ruler', start: 0, end: 100 };
+  assert.equal(outline(ruler), 'M-50.000 -100.000 L50.000 -100.000');
+  assert.equal(outline({ ...ruler, start: 100, end: 0 }), 'M50.000 -100.000 L-50.000 -100.000');
+  assert.deepEqual(outlinePoints(ruler), [[-50, 0], [50, 0]]);
+  assert.deepEqual(point({ ...ruler, rotation: 90 }, 1).map(Math.round), [0, -50]);
+  assert.deepEqual(validateDocument({ ...createDocument(), layers: [ruler] }).layers[0], ruler);
+});
+
+test('overlap masks use only visible upper layers and follow ordering and sector clipping', () => {
+  const lower = { ...layer, hideOverlap: true };
+  const upper = { ...layer, id: 'upper', clip: true };
+  const svg = renderArtwork([lower, upper]);
+  const mask = svg.match(/<mask[^>]*>[\s\S]*?<\/mask>/)[0];
+  assert.ok(mask.includes('fill="black"'));
+  assert.ok(mask.includes('href="#artwork-outline-1"'));
+  assert.ok(mask.includes('clip-path="url(#artwork-sector-1)"'));
+  assert.ok(!mask.includes('href="#artwork-outline-0"'));
+  for (const layers of [[upper, lower], [lower, { ...upper, visible: false }], [{ ...lower, hideOverlap: false }, upper]]) {
+    assert.ok(!renderArtwork(layers).includes('<mask'));
+  }
+  const selected = renderArtwork([lower, upper], 'selection', { id: lower.id, color: '#00a2cf', width: 5 });
+  assert.ok(selected.includes('mask="url(#selection-overlap-0)"'));
+  assert.ok(selected.includes('stroke="#00a2cf"'));
+  const rulerMask = renderArtwork([lower, { ...upper, type: 'line', mode: 'ruler' }]).match(/<mask[^>]*>[\s\S]*?<\/mask>/)[0];
+  assert.ok(rulerMask.includes('fill="none" stroke="black"'));
+});
+
+const segments = path => [...path.matchAll(/M([\d.e+-]+) ([\d.e+-]+) L([\d.e+-]+) ([\d.e+-]+)/g)].map(m => m.slice(1).map(Number));
+test('merged circles retain the exterior and remove both interior arcs', () => {
+  const input = { ...layer, x: 0, y: -30, rx: 50, divisions: 2, mergeOverlap: true };
+  const edges = segments(globalThis.CircleGeometry.mergedOutline(input));
+  assert.ok(edges.length > 500);
+  for (const [ax, ay, bx, by] of edges) {
+    const x = (ax + bx) / 2, y = (ay + by) / 2;
+    assert.ok(Math.hypot(x, y - 30) >= 49.999 && Math.hypot(x, y + 30) >= 49.999);
+  }
+  assert.ok(edges.some(e => e[1] < -79.99));
+  assert.ok(edges.some(e => e[1] > 79.99));
+});
+
+test('merging keeps coincident outlines and disjoint copies', () => {
+  const identical = segments(globalThis.CircleGeometry.mergedOutline({ ...layer, x: 0, y: 0, rx: 50, divisions: 4 }));
+  assert.ok(identical.length >= 720);
+  assert.ok(identical.every(([ax, ay]) => Math.abs(Math.hypot(ax, ay) - 50) < .001));
+  const separate = segments(globalThis.CircleGeometry.mergedOutline({ ...layer, x: 0, y: -100, rx: 20, divisions: 2 }));
+  assert.equal(separate.length, 1440);
+});
+
+test('merged polygons remove a shared interior edge without losing exterior collinear edges', () => {
+  const input = { ...layer, type: 'polygon', sides: 4, rx: 50, ry: 50, rotation: 45, divisions: 2, x: 0, y: -50 / Math.sqrt(2) };
+  const edges = segments(globalThis.CircleGeometry.mergedOutline(input));
+  assert.equal(edges.length, 6);
+  assert.ok(!edges.some(([, ay, , by]) => Math.abs(ay) < .001 && Math.abs(by) < .001));
+});
+
+test('merge setting validates, persists and composes with upper masks and clipping', () => {
+  const input = { ...layer, mergeOverlap: true, hideOverlap: true };
+  assert.deepEqual(validateDocument({ ...createDocument(), layers: [input] }).layers[0], input);
+  assert.throws(() => validateDocument({ ...createDocument(), layers: [{ ...layer, mergeOverlap: 'yes' }] }));
+  const upper = { ...layer, id: 'upper' };
+  const merged = renderArtwork([input, upper]);
+  assert.ok(merged.includes('mask="url(#artwork-overlap-0)"'));
+  assert.ok(!merged.includes('href="#artwork-outline-0"'));
+  assert.ok(renderArtwork([{ ...input, clip: true }]).includes('clip-path='));
+  assert.ok(renderArtwork([{ ...input, mode: 'ruler', type: 'line' }]).includes('href="#artwork-outline-0"'));
+});
+
+test('regular polygons have equal radii and edges regardless of stored vertical radius', () => {
+  for (const sides of [3, 4, 5, 6, 13, 32]) {
+    const input = { ...layer, type: 'polygon', sides, rx: 80, ry: 17, rotation: 37, x: 23, y: -45 };
+    const vertices = Array.from({ length: sides }, (_, i) => point(input, i / sides));
+    for (let i = 0; i < sides; i++) {
+      const a = vertices[i], b = vertices[(i + 1) % sides];
+      assert.ok(Math.abs(Math.hypot(a[0] - input.x, a[1] - input.y) - 80) < 1e-9);
+      assert.ok(Math.abs(Math.hypot(a[0] - b[0], a[1] - b[1]) - 160 * Math.sin(Math.PI / sides)) < 1e-9);
+    }
+    assert.equal(outline(input), outline({ ...input, ry: 300 }));
+  }
+});
+
+test('global stroke and background settings round-trip and reject invalid values', () => {
+  const data = { ...createDocument(), layers: [layer], globalColor: '#123456', globalWidth: 3.25, backgroundColor: '#abcdef' };
+  assert.deepEqual(validateDocument(data), data);
+  for (const patch of [{ globalColor: 'red' }, { backgroundColor: 'url(bad)' }, { globalWidth: 0 }, { globalWidth: 21 }, { globalWidth: '2' }, { globalWidth: NaN }]) {
+    assert.throws(() => validateDocument({ ...data, ...patch }));
+  }
+  assert.deepEqual(validateDocument({ ...createDocument(), layers: [] }), { ...createDocument(), layers: [] });
+});
+
+test('default strokes follow globals while custom strokes retain independent values', () => {
+  const doc = { globalColor: '#abcdef', globalWidth: 7 };
+  const inherited = { ...layer, strokeMode: 'default' }, custom = { ...layer, strokeMode: 'custom' };
+  assert.equal(globalThis.CircleGeometry.resolveStroke(inherited, doc).color, '#abcdef');
+  assert.equal(globalThis.CircleGeometry.resolveStroke(inherited, doc).width, 7);
+  assert.deepEqual(globalThis.CircleGeometry.resolveStroke(custom, doc), custom);
+  assert.equal(inherited.width, 1);
+  const data = { ...createDocument(), layers: [custom], ...doc };
+  assert.deepEqual(validateDocument(data), data);
+  assert.throws(() => validateDocument({ ...data, layers: [{ ...custom, strokeMode: 'invalid' }] }));
+  const svg = renderArtwork([inherited, { ...custom, id: 'custom' }].map(l => globalThis.CircleGeometry.resolveStroke(l, doc)));
+  assert.ok(svg.includes('stroke="#abcdef" stroke-width="7"'));
+  assert.ok(svg.includes('stroke="#d6ba7d" stroke-width="1"'));
+});
+
+test('drop and heart are closed symmetric shapes with distinct tips and supported persistence', () => {
+  for (const type of ['drop', 'heart']) {
+    const input = { ...layer, type, x: 0, y: 0, rx: 60, ry: 100, rotation: 0 };
+    assert.ok(outline(input).endsWith(' Z'));
+    assert.deepEqual(validateDocument({ ...createDocument(), layers: [input] }).layers[0], input);
+    for (const t of [.1, .25, .4]) {
+      const a = point(input, t), b = point(input, 1 - t);
+      assert.ok(Math.abs(a[0] + b[0]) < 1e-9);
+      assert.ok(Math.abs(a[1] - b[1]) < 1e-9);
+    }
+    for (const [x, y] of outlinePoints(input)) {
+      assert.ok(Math.abs(x) <= 60.00001 && Math.abs(y) <= 100.00001);
+    }
+    const rotated = point({ ...input, rotation: 90, x: 20, y: 30 }, .25), original = point(input, .25);
+    assert.ok(Math.abs(rotated[0] - (20 - original[1])) < 1e-9);
+    assert.ok(Math.abs(rotated[1] - (30 + original[0])) < 1e-9);
+    assert.ok(globalThis.CircleGeometry.mergedOutline({ ...input, y: -30, divisions: 3 }).length > 0);
+  }
+  const drop = { ...layer, type: 'drop', x: 0, y: 0, rx: 60, ry: 100 };
+  assert.deepEqual(point(drop, 0), [0, -100]);
+  const heart = { ...drop, type: 'heart' };
+  assert.ok(point(heart, .1)[1] < point(heart, 0)[1]);
+  assert.ok(Math.abs(point(heart, .5)[1] - 100) < 1e-9);
+});
+
+test('crescent has shared tips and a depth-controlled inner arc', () => {
+  const l = { ...layer, type: 'crescent', rx: 100, ry: 80, x: 0, y: 0, crescentDepth: 55 };
+  assert.ok(outline(l).endsWith(' Z'));
+  assert.ok(Math.abs(point(l, 0)[0] - 50) < 1e-9);
+  assert.ok(Math.abs(point(l, .5)[1] - 40 * Math.sqrt(3)) < 1e-9);
+  assert.ok(Math.abs(point(l, .25)[0] + 100) < 1e-9);
+  assert.ok(point({ ...l, crescentDepth: 90 }, .75)[0] < point(l, .75)[0]);
+  assert.ok(Math.hypot(...point(l, 1).map((n, i) => n - point(l, 0)[i])) < 1e-9);
+  assert.deepEqual(validateDocument({ ...createDocument(), layers: [l] }).layers[0], l);
+});
+
+test('fan includes exact radial corners and becomes a seamless circle at 360 degrees', () => {
+  const l = { ...layer, type: 'fan', rx: 100, x: 0, y: 0, arcAngle: 90 };
+  assert.ok(Math.hypot(...point(l, 0)) < 1e-9);
+  assert.ok(Math.abs(point(l, .25)[0] + Math.sqrt(5000)) < 1e-9);
+  assert.ok(Math.abs(point(l, .75)[0] - Math.sqrt(5000)) < 1e-9);
+  for (const angle of [1, 90, 180, 270, 359]) {
+    const shape = { ...l, arcAngle: angle };
+    assert.ok(outline(shape).endsWith(' Z'));
+    assert.ok(outlinePoints(shape).every(p => Math.hypot(...p) <= 100.00001));
+  }
+  assert.equal(outline({ ...l, arcAngle: 360 }), outline({ ...l, type: 'circle' }));
+  assert.deepEqual(validateDocument({ ...createDocument(), layers: [l] }).layers[0], l);
+});
+
+test('new shape parameters reject invalid values and invalidate merged geometry', () => {
+  for (const patch of [{ arcAngle: 0 }, { arcAngle: 361 }, { arcAngle: null }, { crescentDepth: -1 }, { crescentDepth: 96 }, { crescentDepth: '55' }]) {
+    assert.throws(() => validateDocument({ ...createDocument(), layers: [{ ...layer, ...patch }] }));
+  }
+  for (const [type, key, a, b] of [['fan', 'arcAngle', 45, 120], ['crescent', 'crescentDepth', 20, 80]]) {
+    const l = { ...layer, type, mergeOverlap: true, divisions: 2, rx: 30, ry: 30 };
+    assert.notEqual(renderArtwork([{ ...l, [key]: a }]), renderArtwork([{ ...l, [key]: b }]));
+  }
+});
+
+test('shape switches reset geometry while preserving placement and drawing settings', () => {
+  const original = { ...layer, rx: 100, ry: 5, sides: 19, sharpness: .2, crescentDepth: 91, arcAngle: 305, rotation: 47, phase: 23, hideOverlap: true, mergeOverlap: true, strokeMode: 'custom' };
+  const ratios = { circle: 1, ellipse: 1.4, leaf: 1.6, drop: 1.4, heart: 1.2, crescent: 1, fan: 1, polygon: 1, star: 1, pointed: 1.5 };
+  for (const [type, ratio] of Object.entries(ratios)) {
+    const updated = { ...original, ...globalThis.CircleGeometry.shapeDefaults(original, type) };
+    assert.equal(updated.rx, 100);
+    assert.equal(updated.ry, 100 * ratio);
+    assert.equal(updated.sides, type === 'polygon' ? 6 : 5);
+    assert.equal(updated.crescentDepth, 55);
+    assert.equal(updated.arcAngle, 90);
+    assert.ok(Math.abs(updated.sharpness - (type === 'star' ? 1.527864045 : 2.5)) < 1e-8);
+    for (const key of ['x', 'y', 'rotation', 'phase', 'divisions', 'width', 'color', 'strokeMode', 'hideOverlap', 'mergeOverlap']) assert.equal(updated[key], original[key]);
+    assert.deepEqual(validateDocument({ ...createDocument(), layers: [updated] }).layers[0], updated);
+    const large = { ...original, ...globalThis.CircleGeometry.shapeDefaults({ ...original, rx: 380 }, type) };
+    assert.ok(large.rx <= 380 && large.ry <= 380);
+    assert.ok(Math.abs(large.ry / large.rx - ratio) < 1e-9);
+  }
+  assert.equal(original.ry, 5);
+});
+
+test('current documents require every setting and reject unsupported fields and ruler kinds', () => {
+  const document = createDocument([layer]);
+  assert.deepEqual(validateDocument(document), document);
+  for (const key of Object.keys(document)) {
+    const incomplete = { ...document }; delete incomplete[key];
+    assert.throws(() => validateDocument(incomplete), key);
+  }
+  for (const key of Object.keys(layer)) {
+    const incomplete = { ...layer }; delete incomplete[key];
+    assert.throws(() => validateDocument(createDocument([incomplete])), key);
+  }
+  for (const type of Object.keys(globalThis.CircleGeometry.TYPES)) {
+    assert.throws(() => validateDocument(createDocument([{ ...layer, type, mode: 'ruler' }])));
+  }
+  for (const type of ['line', 'curve']) {
+    const ruler = { ...layer, type, mode: 'ruler' };
+    assert.deepEqual(validateDocument(createDocument([ruler])).layers[0], ruler);
+  }
+  assert.throws(() => validateDocument({ ...document, unknown: true }));
+  assert.throws(() => validateDocument(createDocument([{ ...layer, unknown: true }])));
+  const empty = createDocument(); empty.layers.push(layer);
+  assert.equal(createDocument().layers.length, 0);
+});
