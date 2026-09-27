@@ -258,6 +258,24 @@ $('file-input').onchange = async event => {
   const file = event.target.files[0]; if (!file) return;
   try { if (file.size > 1024 * 1024) throw new Error('ファイルは1MB以下にしてください。'); const loaded = validateDocument(JSON.parse(await file.text())); remember(); doc = loaded; selected = doc.layers.at(-1)?.id; changed(); notify('作成データを読み込みました。'); } catch (error) { notify('読み込めませんでした。' + error.message); } finally { event.target.value = ''; }
 };
+let previewScale = 100;
+function zoomPreview(scale) {
+  previewScale = Math.max(25, Math.min(400, scale));
+  const size = 800 * 100 / previewScale;
+  $('preview-canvas').setAttribute('viewBox', `${-size / 2} ${-size / 2} ${size} ${size}`);
+  $('preview-scale').textContent = `${previewScale}%`;
+  $('preview-minus').disabled = previewScale === 25;
+  $('preview-plus').disabled = previewScale === 400;
+}
+$('preview-minus').onclick = () => zoomPreview(previewScale - 25);
+$('preview-plus').onclick = () => zoomPreview(previewScale + 25);
+$('preview').onclick = () => {
+  zoomPreview(100);
+  $('preview-canvas').style.backgroundColor = doc.backgroundColor;
+  $('preview-canvas').innerHTML = renderArtwork(artworkLayers(), 'preview');
+  $('preview-dialog').showModal();
+};
+$('preview-dialog').addEventListener('close', () => { $('preview-canvas').innerHTML = ''; });
 $('export').onclick = () => $('export-dialog').showModal();
 $('download').onclick = async () => {
   const button = $('download'); button.disabled = true;
