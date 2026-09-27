@@ -43,6 +43,7 @@ h2{font-size:15px;margin:0}
 .canvas-panel{display:flex;flex-direction:column;min-width:0;min-height:0;background:#fff}
 .canvas-toolbar{min-height:38px;display:flex;align-items:center;justify-content:space-between;padding:4px 12px;color:#536773;gap:8px;flex-shrink:0}
 .canvas-title{min-width:0}
+.canvas-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
 #selection-label{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;color:#006580}
 .history{display:flex;gap:4px;flex-shrink:0}
 .history button{background:transparent;font-size:21px;line-height:1;padding:2px 7px}
@@ -70,6 +71,13 @@ dialog{width:350px;max-width:calc(100vw - 24px);border:1px solid #b5c2cb;border-
 dialog::backdrop{background:#0007;backdrop-filter:blur(3px)}
 dialog p{font-size:14px;color:var(--muted)}
 dialog .primary{width:100%;margin-top:12px}
+#preview-dialog{width:100%;height:100dvh;max-width:none;max-height:none;margin:0;padding:0;border:0;border-radius:0;overflow:hidden}
+#preview-dialog form{height:100%;display:flex;flex-direction:column}
+.preview-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-shrink:0;padding:8px;border-bottom:1px solid var(--line);background:var(--panel)}
+.preview-zoom{display:flex;align-items:center;gap:6px}
+.preview-zoom button{min-width:36px;min-height:36px;font-size:20px}
+#preview-scale{min-width:44px;text-align:center;font-variant-numeric:tabular-nums}
+#preview-canvas{display:block;width:100%;flex:1;min-height:0;overflow:hidden}
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);max-width:calc(100vw - 24px);background:#fff;border:1px solid #9cacb7;border-radius:5px;padding:7px 12px;font-size:14px;z-index:3}
 @media(min-width:1500px){.workspace{grid-template-columns:240px 1fr 300px}}
 @media(max-width:1000px){.workspace{grid-template-columns:180px minmax(250px,1fr) 264px}.layers-panel,.properties-panel{padding:10px}}
