@@ -88,19 +88,20 @@ function sector(divisions) {
   const half = Math.PI / divisions, r = 1600;
   return `M0 0 L${-Math.sin(half) * r} ${-Math.cos(half) * r} A${r} ${r} 0 0 1 ${Math.sin(half) * r} ${-Math.cos(half) * r} Z`;
 }
-// Split the original edges at crossings, then keep only the union boundary.
+// Split edges at crossings, then trace union or visible-surface boundaries.
 // A spatial grid bounds intersection work; horizontal buckets speed up inside tests.
-function mergedOutline(layer) {
+function mergedOutline(layer, stacked = false) {
   const cell = 32, epsilon = 1e-5, polygons = [], seen = new Set(), grid = new Map();
   const source = outlinePoints(layer).map(([x, y]) => [x + layer.x, y + layer.y]);
   for (let copy = 0; copy < layer.divisions; copy++) {
-    const angle = (layer.phase + copy * 360 / layer.divisions) * Math.PI / 180;
+    const direction = stacked && layer.mergeOverlap === 'counterclockwise' ? -1 : 1;
+    const angle = (layer.phase + direction * copy * 360 / layer.divisions) * Math.PI / 180;
     const points = source.map(([x, y]) => [x * Math.cos(angle) - y * Math.sin(angle), x * Math.sin(angle) + y * Math.cos(angle)]);
     const key = points.map(p => p.map(n => n.toFixed(5)).join(',')).sort().join(';');
     if (seen.has(key)) continue;
     seen.add(key);
     const bounds = [Math.min(...points.map(p => p[0])), Math.min(...points.map(p => p[1])), Math.max(...points.map(p => p[0])), Math.max(...points.map(p => p[1]))];
-    const polygon = { bounds, rows: new Map(), edges: [] };
+    const polygon = { copy, bounds, rows: new Map(), edges: [] };
     points.forEach((a, i) => {
       const b = points[(i + 1) % points.length], edge = { a, b, polygon };
       polygon.edges.push(edge);
@@ -116,7 +117,7 @@ function mergedOutline(layer) {
     });
     polygons.push(polygon);
   }
-  const inside = (x, y) => polygons.some(polygon => {
+  const contains = (polygon, x, y) => {
     const [left, top, right, bottom] = polygon.bounds;
     if (x < left || x > right || y < top || y > bottom) return false;
     let result = false;
@@ -124,7 +125,29 @@ function mergedOutline(layer) {
       if ((a[1] > y) !== (b[1] > y) && x < a[0] + (y - a[1]) * (b[0] - a[0]) / (b[1] - a[1])) result = !result;
     }
     return result;
-  });
+  };
+  const surface = (x, y) => {
+    if (!stacked) return polygons.some(polygon => contains(polygon, x, y));
+    const covering = polygons.filter(polygon => contains(polygon, x, y));
+    if (layer.divisions <= 2) return covering.at(-1)?.copy ?? -1;
+    if (!covering.length) return -1;
+    // Fully shared areas have no meaningful front copy in a circular order.
+    if (covering.length === polygons.length) return 'center';
+    // The end of each covered run sits above its preceding neighbours,
+    // including the last/first seam. Never privilege the initial copy.
+    const covered = new Set(covering.map(p => p.copy));
+    const ends = covering.filter(p => !covered.has((p.copy + 1) % layer.divisions));
+    if (ends.length === 1) return ends[0].copy;
+    // Disconnected runs (possible with concave shapes) use a local angular
+    // tie-break that rotates with the artwork instead of a fixed copy index.
+    const direction = layer.mergeOverlap === 'counterclockwise' ? -1 : 1;
+    const a = Math.atan2(y, x) * 180 / Math.PI;
+    ends.sort((p, q) => {
+      const rank = copy => ((direction * (a - layer.phase - Math.atan2(layer.y, layer.x) * 180 / Math.PI) - copy * 360 / layer.divisions) % 360 + 360) % 360;
+      return rank(p.copy) - rank(q.copy);
+    });
+    return ends[0]?.copy ?? 'center';
+  };
   const paths = [], emitted = new Set();
   for (const polygon of polygons) for (const edge of polygon.edges) {
     const { a, b } = edge, dx = b[0] - a[0], dy = b[1] - a[1], length = Math.hypot(dx, dy);
@@ -153,7 +176,10 @@ function mergedOutline(layer) {
       if ((to - from) * length < epsilon) continue;
       const t = (from + to) / 2, x = a[0] + t * dx, y = a[1] + t * dy;
       const nx = -dy / length * epsilon, ny = dx / length * epsilon;
-      if (inside(x + nx, y + ny) === inside(x - nx, y - ny)) continue;
+      // Trace boundaries between visible regions, including where the front
+      // surface changes at a triple overlap. Masking original strokes alone
+      // loses those connecting edges and leaves dangling line ends.
+      if (surface(x + nx, y + ny) === surface(x - nx, y - ny)) continue;
       const start = [a[0] + from * dx, a[1] + from * dy].map(n => n.toFixed(5)).join(' ');
       const end = [a[0] + to * dx, a[1] + to * dy].map(n => n.toFixed(5)).join(' ');
       const key = [start, end].sort().join('|');
@@ -164,10 +190,10 @@ function mergedOutline(layer) {
 }
 const mergeCache = new Map();
 function mergedPath(layer) {
-  const key = JSON.stringify(['type', 'x', 'y', 'rx', 'ry', 'rotation', 'phase', 'sides', 'sharpness', 'divisions', 'crescentDepth', 'arcAngle'].map(k => layer[k]));
+  const key = JSON.stringify(['type', 'x', 'y', 'rx', 'ry', 'rotation', 'phase', 'sides', 'sharpness', 'divisions', 'crescentDepth', 'arcAngle', 'mergeOverlap'].map(k => layer[k]));
   if (!mergeCache.has(key)) {
     if (mergeCache.size >= 80) mergeCache.delete(mergeCache.keys().next().value);
-    mergeCache.set(key, mergedOutline(layer));
+    mergeCache.set(key, mergedOutline(layer, ['clockwise', 'counterclockwise'].includes(layer.mergeOverlap)));
   }
   return mergeCache.get(key);
 }
@@ -182,7 +208,8 @@ function renderArtwork(layers, prefix = 'artwork', selection = null) {
     if (selection && l.id !== selection.id) return '';
     const upper = l.hideOverlap ? visible.slice(index + 1) : [];
     const mask = upper.length ? `<mask id="${prefix}-overlap-${index}" maskUnits="userSpaceOnUse" x="-400" y="-400" width="800" height="800" style="mask-type:luminance"><rect x="-400" y="-400" width="800" height="800" fill="white"/>${upper.map((top, offset) => `<g fill="${top.mode === 'shape' ? 'black' : 'none'}" stroke="black" stroke-width="${top.width}" stroke-linejoin="round" stroke-linecap="round">${repeat(top, index + 1 + offset, `<use href="#${prefix}-outline-${index + 1 + offset}" xlink:href="#${prefix}-outline-${index + 1 + offset}"/>`)}</g>`).join('')}</mask>` : '';
-    const content = l.mergeOverlap && l.mode === 'shape' && l.divisions > 1 && !l.clip ? `<path d="${mergedPath(l)}"/>` : repeat(l, index, `<use href="#${prefix}-outline-${index}" xlink:href="#${prefix}-outline-${index}"/>`);
+    const sameOverlap = l.mergeOverlap && l.mode === 'shape' && l.divisions > 1 && !l.clip;
+    const content = sameOverlap ? `<path d="${mergedPath(l)}"/>` : repeat(l, index, `<use href="#${prefix}-outline-${index}" xlink:href="#${prefix}-outline-${index}"/>`);
     return `${mask}<g${mask ? ` mask="url(#${prefix}-overlap-${index})"` : ''} fill="none" stroke="${selection?.color || l.color}" stroke-width="${selection?.width ?? l.width}" stroke-linejoin="round" stroke-linecap="round">${content}</g>`;
   }).join('');
   return `<defs>${defs}</defs>${artwork}`;
@@ -255,7 +282,8 @@ function validateDocument(data) {
   const ids = new Set();
   const layerKeys = ['id', 'type', 'mode', 'color', 'strokeMode', 'visible', 'clip', 'hideOverlap', 'mergeOverlap', ...Object.keys(LIMITS)];
   const layers = data.layers.map(raw => {
-    if (!raw || Object.keys(raw).some(key => !layerKeys.includes(key)) || typeof raw.id !== 'string' || !raw.id || ids.has(raw.id) || raw.id.length > 100 || !['shape', 'ruler'].includes(raw.mode) || !Object.hasOwn(raw.mode === 'shape' ? TYPES : RULER_TYPES, raw.type) || !isColor(raw.color) || !['default', 'custom'].includes(raw.strokeMode) || ['visible', 'clip', 'hideOverlap', 'mergeOverlap'].some(key => typeof raw[key] !== 'boolean')) throw new Error('レイヤーの形式が正しくありません。');
+    if (!raw || Object.keys(raw).some(key => !layerKeys.includes(key)) || typeof raw.id !== 'string' || !raw.id || ids.has(raw.id) || raw.id.length > 100 || !['shape', 'ruler'].includes(raw.mode) || !Object.hasOwn(raw.mode === 'shape' ? TYPES : RULER_TYPES, raw.type) || !isColor(raw.color) || !['default', 'custom'].includes(raw.strokeMode) || ['visible', 'clip', 'hideOverlap'].some(key => typeof raw[key] !== 'boolean')) throw new Error('レイヤーの形式が正しくありません。');
+    if (![false, true, 'clockwise', 'counterclockwise'].includes(raw.mergeOverlap)) throw new Error('同レイヤーとの重なりの設定が正しくありません。');
     ids.add(raw.id);
     for (const [key, [min, max]] of Object.entries(LIMITS)) {
       if (!Number.isFinite(raw[key]) || raw[key] < min || raw[key] > max || (['sides', 'divisions'].includes(key) && !Number.isInteger(raw[key]))) throw new Error('数値が有効範囲を超えています。');

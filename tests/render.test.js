@@ -67,6 +67,20 @@ test('settings preserve explicit geometry, infer rulers and apply custom strokes
   assert.match(svg, /clip-path=/);
 });
 
+test('CLI exports directional overlap on a transparent background and preserves settings', t => {
+  const w = workspace(t);
+  for (const mergeOverlap of ['clockwise', 'counterclockwise']) {
+    const result = w.run({ transparent: true, layers: [{ type: 'circle', y: -60, rx: 90, divisions: 4, mergeOverlap }] });
+    assert.equal(result.status, 0, result.stderr);
+    const doc = globalThis.CircleGeometry.validateDocument(JSON.parse(w.read('magic-circle.json')));
+    assert.equal(doc.layers[0].mergeOverlap, mergeOverlap);
+    const svg = w.read('magic-circle.svg');
+    assert.ok(svg.includes(globalThis.CircleGeometry.mergedOutline(doc.layers[0], true)));
+    assert.doesNotMatch(svg, /same-overlap/);
+    assert.doesNotMatch(svg.replace(/<mask\b.*?<\/mask>/g, ''), /<rect/);
+  }
+});
+
 test('invalid recipes fail without producing output files', t => {
   const w = workspace(t);
   for (const recipe of [null, {}, [null], [{ type: 'unknown' }], [{ rx: -1 }], [{ colour: '#000000' }],

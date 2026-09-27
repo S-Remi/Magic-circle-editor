@@ -62,6 +62,6 @@ inkscape magic-circle.svg --export-type=png --export-area-page --export-filename
 ```
 
 既定は2048px・白背景・黒線1.5。透明背景は配列を `{"transparent":true,"layers":[...]}` で包みます。同じ形式で `size`・`globalColor`・`globalWidth`・`backgroundColor` も指定できます。
-レイヤー末尾が手前。`color`・`width` は個別の線設定、`hideOverlap` は手前による隠蔽、`mergeOverlap` は同レイヤーの合体です。図形・数値範囲は `geometry.js` の `TYPES`・`RULER_TYPES`・`LIMITS` を参照します。
+レイヤー末尾が手前。`color`・`width` は個別の線設定、`hideOverlap` は手前による隠蔽、`mergeOverlap` は同レイヤーの重なりで、`false`（隠さない）・`true`（合体）・`"clockwise"`（時計回りに上へ）・`"counterclockwise"`（反時計回りに上へ）を指定します。方向指定では指定方向へ順に上へ重ねます。3分割以上では各点を覆う図形の連続した並びを循環順序で調べ、その末尾を手前にします。全図形が重なる部分は共通領域、複数の並びがある場合はその点の角度に応じて手前を決めます。開始位置だけを特別扱いしません。各輪郭を交点で分割し、両側の最前面の図形が異なる境界を描きます。元の線のマスクだけでは失われる三重交差の接続部分も描画し、線の途切れを防ぎます。2分割では相互に隠れないよう通常の順序を保ちます。図形・数値範囲は `geometry.js` の `TYPES`・`RULER_TYPES`・`LIMITS` を参照します。
 
 4. PNGの描画・重なり・背景を確認し、会話内にプレビュー表示してPNG・SVG・編集用JSONを渡します。実行できない工程は明示し、PNG化できない場合はSVG・JSONとエディターでの書き出し手順を渡します。画像生成モデルによる描き直しで代替しません。

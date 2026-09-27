@@ -3,6 +3,86 @@ import assert from 'node:assert/strict';
 import '../web/geometry.js';
 const { point, outline, renderArtwork, outlinePoints, fitToSector, snapPosition, snapAngle, createDocument, validateDocument } = globalThis.CircleGeometry;
 const layer = { id: 'test', strokeMode: 'custom', crescentDepth: 55, arcAngle: 90, hideOverlap: false, mergeOverlap: false, mode: 'shape', type: 'circle', divisions: 6, width: 1, x: 0, y: -100, rx: 50, ry: 30, rotation: 0, phase: 0, sides: 6, sharpness: 2, start: 0, end: 75, color: '#d6ba7d', clip: false, visible: true };
+test('directional overlap persists both directions and rejects unknown modes', () => {
+  for (const mergeOverlap of [false, true, 'clockwise', 'counterclockwise']) {
+    const doc = createDocument([{ ...layer, mergeOverlap }]);
+    assert.deepEqual(validateDocument(JSON.parse(JSON.stringify(doc))), doc);
+  }
+  for (const mergeOverlap of [null, 0, 'true', 'false', 'invalid', {}, []]) {
+    assert.throws(() => validateDocument(createDocument([{ ...layer, mergeOverlap }])));
+  }
+});
+test('directional boundaries stay connected in dense overlaps and at the seam', () => {
+  for (const mergeOverlap of ['clockwise', 'counterclockwise']) {
+    for (const divisions of [2, 3, 4, 6, 8]) for (const y of [0, -30, -60, -100, -134.3]) {
+      const input = { ...layer, mergeOverlap, divisions, y, rx: 100, phase: 23 };
+      const path = globalThis.CircleGeometry.mergedOutline(input, true);
+      const edges = segments(path);
+      assert.ok(edges.length > 0);
+      const endpoints = edges.flatMap(([ax, ay, bx, by]) => [[ax, ay], [bx, by]]);
+      const buckets = new Map();
+      const cell = .001;
+      for (const p of endpoints) {
+        const key = p.map(n => Math.floor(n / cell)).join(',');
+        if (!buckets.has(key)) buckets.set(key, []);
+        buckets.get(key).push(p);
+      }
+      for (const p of endpoints) {
+        let degree = 0;
+        const [cx, cy] = p.map(n => Math.floor(n / cell));
+        for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+          for (const q of buckets.get([cx + dx, cy + dy].join(',')) || []) {
+            if (Math.hypot(p[0] - q[0], p[1] - q[1]) < .00003) degree++;
+          }
+        }
+        assert.ok(degree >= 2, JSON.stringify({ mergeOverlap, divisions, y, dangling: p }));
+      }
+    }
+  }
+});
+test('directional overlap repeats the same silhouette around the full ring at every density', () => {
+  for (const mergeOverlap of ['clockwise', 'counterclockwise']) {
+    for (const divisions of [3, 4, 6, 8]) for (const y of [-30, -60, -100, -134.3]) {
+      const input = { ...layer, mergeOverlap, divisions, y, rx: 100, phase: 23 };
+      const edges = segments(globalThis.CircleGeometry.mergedOutline(input, true));
+      const lengths = Array(divisions).fill(0);
+      for (const [ax, ay, bx, by] of edges) {
+        const angle = ((Math.atan2(ay + by, ax + bx) * 180 / Math.PI - input.phase + 90) % 360 + 360) % 360;
+        lengths[Math.floor(angle * divisions / 360) % divisions] += Math.hypot(bx - ax, by - ay);
+      }
+      assert.ok(Math.max(...lengths) - Math.min(...lengths) < .002,
+        JSON.stringify({ mergeOverlap, divisions, y, lengths }));
+      // Every sampled boundary midpoint must remain on a boundary after one
+      // repetition. Equal length alone could hide differently shaped sectors.
+      const angle = 2 * Math.PI / divisions, cos = Math.cos(angle), sin = Math.sin(angle);
+      for (let i = 0; i < edges.length; i += 19) {
+        const [ax, ay, bx, by] = edges[i], x = (ax + bx) / 2, py = (ay + by) / 2;
+        const px = x * cos - py * sin, qy = x * sin + py * cos;
+        assert.ok(edges.some(([cx, cy, dx, dy]) => {
+          const vx = dx - cx, vy = dy - cy, length2 = vx * vx + vy * vy;
+          const t = Math.max(0, Math.min(1, ((px - cx) * vx + (qy - cy) * vy) / length2));
+          return Math.hypot(px - cx - t * vx, qy - cy - t * vy) < .00003;
+        }), JSON.stringify({ mergeOverlap, divisions, y, missing: [px, qy] }));
+      }
+    }
+  }
+});
+test('directional rendering shares boundaries with selection and composes with upper masks', () => {
+  const input = { ...layer, mergeOverlap: 'clockwise', divisions: 6, rx: 100, y: -60 };
+  const path = globalThis.CircleGeometry.mergedOutline(input, true);
+  const svg = renderArtwork([input, { ...layer, id: 'upper' }]);
+  assert.ok(svg.includes(path));
+  assert.doesNotMatch(svg, /same-overlap/);
+  assert.match(renderArtwork([{ ...input, hideOverlap: true }, { ...layer, id: 'upper' }]), /mask="url\(#artwork-overlap-0\)"/);
+  const highlight = renderArtwork([input], 'selection', { id: input.id, color: '#006a9c', width: 8 });
+  assert.ok(highlight.includes(path));
+  assert.notEqual(renderArtwork([input]), renderArtwork([{ ...input, mergeOverlap: 'counterclockwise' }]));
+  assert.notEqual(renderArtwork([input]), renderArtwork([{ ...input, mergeOverlap: true }]));
+  for (const patch of [{ divisions: 1 }, { clip: true }, { mode: 'ruler', type: 'curve' }]) {
+    assert.match(renderArtwork([{ ...input, ...patch }]), /href="#artwork-outline-0"/);
+  }
+  assert.doesNotMatch(renderArtwork([{ ...input, visible: false }]), /<path/);
+});
 test('circle points use a shared radius and apply translation and rotation', () => {
   assert.deepEqual(point(layer, 0).map(Math.round), [0, -150]);
   assert.deepEqual(point({ ...layer, rotation: 90 }, 0).map(Math.round), [50, -100]);
