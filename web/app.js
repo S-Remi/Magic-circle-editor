@@ -264,7 +264,7 @@ $('download').onclick = async () => {
   let url;
   try {
     const size = Number($('export-size').value), transparent = $('transparent').checked;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="-400 -400 800 800">${transparent ? '' : `<rect x="-400" y="-400" width="800" height="800" fill="${doc.backgroundColor}"/>`}${renderArtwork(artworkLayers())}</svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${size}" height="${size}" viewBox="-400 -400 800 800">${transparent ? '' : `<rect x="-400" y="-400" width="800" height="800" fill="${doc.backgroundColor}"/>`}${renderArtwork(artworkLayers())}</svg>`;
     const blob = new Blob([svg], { type: 'image/svg+xml' });
     if ($('export-format').value === 'svg') download(blob, 'magic-circle.svg');
     else {
