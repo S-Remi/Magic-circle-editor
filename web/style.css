@@ -11,7 +11,10 @@ button.primary:hover{background:#947233}
 button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .app-header{min-height:44px;padding:6px 12px;flex-shrink:0;flex-wrap:wrap;display:flex;align-items:center;border-bottom:1px solid var(--line);gap:12px}
 .brand{font-family:"Yu Mincho",serif;font-size:17px;letter-spacing:1px;margin:0;white-space:nowrap}
-.file-actions{margin-left:auto;display:flex;gap:6px}
+.file-actions{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.repository-link{display:inline-flex;align-items:center;min-height:28px;padding:3px 5px;color:#536773;font-size:13px;white-space:nowrap;text-underline-offset:3px}
+.repository-link:hover{color:#006580}
+.repository-link:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .workspace{display:grid;grid-template-columns:220px minmax(280px,1fr) 286px;flex:1;min-height:0}
 .layers-panel,.properties-panel{background:var(--panel);padding:12px;min-width:0;overflow-y:auto}
 .layers-panel{border-right:1px solid var(--line);display:flex;flex-direction:column}

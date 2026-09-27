@@ -4,6 +4,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/geometry.test.js"
+    "test": "node --test tests/geometry.test.js tests/render.test.js"
   }
 }
