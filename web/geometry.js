@@ -181,8 +181,8 @@ function renderArtwork(layers, prefix = 'artwork', selection = null) {
   const artwork = visible.map((l, index) => {
     if (selection && l.id !== selection.id) return '';
     const upper = l.hideOverlap ? visible.slice(index + 1) : [];
-    const mask = upper.length ? `<mask id="${prefix}-overlap-${index}" maskUnits="userSpaceOnUse" x="-400" y="-400" width="800" height="800" style="mask-type:luminance"><rect x="-400" y="-400" width="800" height="800" fill="white"/>${upper.map((top, offset) => `<g fill="${top.mode === 'shape' ? 'black' : 'none'}" stroke="black" stroke-width="${top.width}" stroke-linejoin="round" stroke-linecap="round">${repeat(top, index + 1 + offset, `<use href="#${prefix}-outline-${index + 1 + offset}"/>`)}</g>`).join('')}</mask>` : '';
-    const content = l.mergeOverlap && l.mode === 'shape' && l.divisions > 1 && !l.clip ? `<path d="${mergedPath(l)}"/>` : repeat(l, index, `<use href="#${prefix}-outline-${index}"/>`);
+    const mask = upper.length ? `<mask id="${prefix}-overlap-${index}" maskUnits="userSpaceOnUse" x="-400" y="-400" width="800" height="800" style="mask-type:luminance"><rect x="-400" y="-400" width="800" height="800" fill="white"/>${upper.map((top, offset) => `<g fill="${top.mode === 'shape' ? 'black' : 'none'}" stroke="black" stroke-width="${top.width}" stroke-linejoin="round" stroke-linecap="round">${repeat(top, index + 1 + offset, `<use href="#${prefix}-outline-${index + 1 + offset}" xlink:href="#${prefix}-outline-${index + 1 + offset}"/>`)}</g>`).join('')}</mask>` : '';
+    const content = l.mergeOverlap && l.mode === 'shape' && l.divisions > 1 && !l.clip ? `<path d="${mergedPath(l)}"/>` : repeat(l, index, `<use href="#${prefix}-outline-${index}" xlink:href="#${prefix}-outline-${index}"/>`);
     return `${mask}<g${mask ? ` mask="url(#${prefix}-overlap-${index})"` : ''} fill="none" stroke="${selection?.color || l.color}" stroke-width="${selection?.width ?? l.width}" stroke-linejoin="round" stroke-linecap="round">${content}</g>`;
   }).join('');
   return `<defs>${defs}</defs>${artwork}`;
