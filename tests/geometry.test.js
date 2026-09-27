@@ -3,6 +3,79 @@ import assert from 'node:assert/strict';
 import '../web/geometry.js';
 const { point, outline, renderArtwork, outlinePoints, fitToSector, snapPosition, snapAngle, createDocument, validateDocument } = globalThis.CircleGeometry;
 const layer = { id: 'test', strokeMode: 'custom', crescentDepth: 55, arcAngle: 90, hideOverlap: false, mergeOverlap: false, mode: 'shape', type: 'circle', divisions: 6, width: 1, x: 0, y: -100, rx: 50, ry: 30, rotation: 0, phase: 0, sides: 6, sharpness: 2, start: 0, end: 75, color: '#d6ba7d', clip: false, visible: true };
+
+test('freehand fitting preserves endpoints and approximates curved strokes with few cubics', () => {
+  const points = Array.from({ length: 301 }, (_, i) => [i - 150, 55 * Math.sin(i / 35) - 120]);
+  const fitted = { ...layer, ...globalThis.CircleGeometry.fitFreehand(points) };
+  assert.ok(fitted.curves.length < points.length / 2);
+  assert.deepEqual(point(fitted, 0), points[0]);
+  assert.ok(Math.hypot(...point(fitted, 1).map((n, k) => n - points.at(-1)[k])) < 1e-10);
+  const samples = Array.from({ length: 4001 }, (_, i) => point(fitted, i / 4000));
+  for (const p of points) assert.ok(Math.min(...samples.map(q => Math.hypot(p[0] - q[0], p[1] - q[1]))) < 1.6);
+  assert.match(outline(fitted), /^M.*C/);
+  assert.doesNotMatch(outline(fitted), /[LZ]|NaN|Infinity/);
+  assert.deepEqual(validateDocument(JSON.parse(JSON.stringify(createDocument([fitted])))).layers[0], fitted);
+});
+
+test('freehand handles taps, straight lines, duplicates, reversals and closed strokes', () => {
+  const fit = globalThis.CircleGeometry.fitFreehand;
+  assert.equal(fit([[0, 0], [0, 0]]), null);
+  assert.equal(fit([[0, 0]]), null);
+  for (const points of [
+    [[0, 0], [100, 100]], [[0, 0], [0, 0], [0, -100]],
+    [[0, 0], [100, 0], [0, 0]],
+    Array.from({ length: 101 }, (_, i) => [100 * Math.sin(i * Math.PI / 50), 100 * Math.cos(i * Math.PI / 50)])
+  ]) {
+    const fitted = { ...layer, ...fit(points) };
+    assert.doesNotMatch(outline(fitted), /NaN|Infinity|Z/);
+    assert.doesNotThrow(() => validateDocument(createDocument([fitted])));
+    for (const t of [0, 1]) assert.ok(Math.hypot(...point(fitted, t).map((n, k) => n - points[t ? points.length - 1 : 0][k])) < 1e-8);
+  }
+});
+
+test('freehand keeps repeats, clipping and stroke-only overlap through export', () => {
+  const curve = { ...layer, ...globalThis.CircleGeometry.fitFreehand([[0, -100], [30, -150], [0, -200]]), divisions: 8, phase: 17, clip: true };
+  const svg = renderArtwork([curve]);
+  assert.equal((svg.match(/<g transform="rotate/g) || []).length, 8);
+  assert.equal((svg.match(/clip-path=/g) || []).length, 8);
+  assert.match(svg, /rotate\(17\)/);
+  assert.match(svg, /C/);
+  const masked = renderArtwork([{ ...layer, hideOverlap: true }, { ...curve, id: 'upper' }]);
+  assert.match(masked, /<g fill="none" stroke="black"/);
+  assert.doesNotMatch(outline({ ...curve, rotation: 45, rx: 80, ry: 60, x: 50 }), /NaN/);
+});
+
+test('freehand rejects malformed and excessive control point data', () => {
+  const curve = { ...layer, ...globalThis.CircleGeometry.fitFreehand([[0, 0], [10, 20]]) };
+  for (const curves of [undefined, [], [[0, 0]], Array(5).fill([0, 0]), Array(3076).fill([0, 0]), [[0, 0], [0, 0], [0, Infinity], [0, 0]], [[0, 0], [0, 0], [5, 0], [0, 0]], [[0, 0], [0, 0], ['1', 0], [0, 0]]]) {
+    assert.throws(() => validateDocument(createDocument([{ ...curve, curves }])));
+  }
+  assert.throws(() => validateDocument(createDocument([{ ...layer, curves: curve.curves }])));
+});
+
+test('smoothing removes mouse jitter while retaining the broad curve and endpoints', () => {
+  const points = Array.from({ length: 401 }, (_, i) => [i - 200, 60 * Math.sin(i / 65) + 4 * Math.sin(i * 1.9) * Math.sin(i * Math.PI / 400)]);
+  const raw = globalThis.CircleGeometry.fitFreehand(points);
+  const fitted = { ...layer, ...globalThis.CircleGeometry.fitFreehand(points, 2.5, 10) };
+  assert.ok(fitted.curves.length < raw.curves.length / 4);
+  let error = 0;
+  for (let i = 0; i <= 1000; i++) {
+    const [x, y] = point(fitted, i / 1000);
+    error += (y - 60 * Math.sin((x + 200) / 65)) ** 2;
+  }
+  assert.ok(Math.sqrt(error / 1001) < 1.5);
+  for (const t of [0, 1]) assert.ok(Math.hypot(...point(fitted, t).map((n, k) => n - points[t ? 400 : 0][k])) < 1e-8);
+  assert.doesNotThrow(() => validateDocument(createDocument([fitted])));
+});
+
+test('smoothing is independent of extra samples during a slow part of a stroke', () => {
+  const points = Array.from({ length: 81 }, (_, i) => [i * 3, 40 * Math.sin(i / 15)]);
+  const dense = points.flatMap((p, i) => i > 10 && i < 60 ? Array.from({ length: 10 }, (_, j) => p.map((n, k) => n + (points[i + 1][k] - n) * j / 10)) : [p]);
+  const a = { ...layer, ...globalThis.CircleGeometry.fitFreehand(points, 2.5, 10) };
+  const b = { ...layer, ...globalThis.CircleGeometry.fitFreehand(dense, 2.5, 10) };
+  assert.equal(a.curves.length, b.curves.length);
+  for (let i = 0; i <= 100; i++) assert.ok(Math.hypot(...point(a, i / 100).map((n, k) => n - point(b, i / 100)[k])) < 1e-8);
+});
 test('directional overlap persists both directions and rejects unknown modes', () => {
   for (const mergeOverlap of [false, true, 'clockwise', 'counterclockwise']) {
     const doc = createDocument([{ ...layer, mergeOverlap }]);

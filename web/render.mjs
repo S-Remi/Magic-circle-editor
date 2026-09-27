@@ -22,7 +22,7 @@ function render(recipe) {
     try {
       if (!isObject(spec)) throw new Error('図形はオブジェクトで指定してください。');
       const type = spec.type === undefined ? 'circle' : spec.type;
-      const mode = Object.hasOwn(G.RULER_TYPES, type) ? 'ruler' : 'shape';
+      const mode = type === 'freehand' ? 'freehand' : Object.hasOwn(G.RULER_TYPES, type) ? 'ruler' : 'shape';
       const layer = {
         id: randomUUID(), mode, type,
         strokeMode: Object.hasOwn(spec, 'color') || Object.hasOwn(spec, 'width') ? 'custom' : 'default',

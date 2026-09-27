@@ -20,7 +20,12 @@ function shapeDefaults(layer, type) {
 function point(layer, t) {
   const angle = t * Math.PI * 2 - Math.PI / 2;
   let x, y;
-  if (layer.type === 'line') {
+  if (layer.mode === 'freehand') {
+    const count = (layer.curves.length - 1) / 3;
+    const at = Math.max(0, Math.min(1, t)) * count, index = Math.min(count - 1, Math.floor(at));
+    const p = cubicPoint(layer.curves.slice(index * 3, index * 3 + 4), at - index);
+    x = p[0] * layer.rx; y = p[1] * layer.ry;
+  } else if (layer.type === 'line') {
     x = (2 * t - 1) * layer.rx; y = 0;
   } else if (layer.type === 'polygon' || layer.type === 'star') {
     const count = layer.sides * (layer.type === 'star' ? 2 : 1);
@@ -73,6 +78,14 @@ function point(layer, t) {
   return [x * Math.cos(r) - y * Math.sin(r) + layer.x, x * Math.sin(r) + y * Math.cos(r) + layer.y];
 }
 function outline(layer, full = false) {
+  if (layer.mode === 'freehand') {
+    if (layer.curves.every(p => p[0] === layer.curves[0][0] && p[1] === layer.curves[0][1])) return '';
+    const a = layer.rotation * Math.PI / 180;
+    return layer.curves.map(([px, py], i) => {
+      const x = px * layer.rx, y = py * layer.ry;
+      return `${i === 0 ? 'M' : i % 3 === 1 ? 'C' : ''}${(x * Math.cos(a) - y * Math.sin(a) + layer.x).toFixed(3)} ${(x * Math.sin(a) + y * Math.cos(a) + layer.y).toFixed(3)}`;
+    }).join(' ');
+  }
   const start = full || layer.mode === 'shape' ? 0 : layer.start / 100;
   let end = full || layer.mode === 'shape' ? 1 : layer.end / 100;
   if (end < start && layer.type !== 'line') end += 1;
@@ -217,6 +230,11 @@ function renderArtwork(layers, prefix = 'artwork', selection = null) {
 }
 // Use the same vertices as the rendered outline, including exact polygon corners.
 function outlinePoints(layer) {
+  // Control hulls conservatively bound Bezier curves for fitting and snapping.
+  if (layer.mode === 'freehand') {
+    const a = layer.rotation * Math.PI / 180;
+    return layer.curves.map(([x, y]) => [x * layer.rx * Math.cos(a) - y * layer.ry * Math.sin(a), x * layer.rx * Math.sin(a) + y * layer.ry * Math.cos(a)]);
+  }
   if (layer.type === 'line') return [point({ ...layer, x: 0, y: 0 }, 0), point({ ...layer, x: 0, y: 0 }, 1)];
   const count = layer.type === 'polygon' ? layer.sides : layer.type === 'star' ? layer.sides * 2 : 720;
   const centered = { ...layer, x: 0, y: 0 };
@@ -281,9 +299,12 @@ function validateDocument(data) {
   if (!isColor(data.globalColor) || !isColor(data.backgroundColor)) throw new Error('全体の色の形式が正しくありません。');
   if (!Number.isFinite(data.globalWidth) || data.globalWidth < LIMITS.width[0] || data.globalWidth > LIMITS.width[1]) throw new Error('全体の太さが有効範囲を超えています。');
   const ids = new Set();
-  const layerKeys = ['id', 'type', 'mode', 'color', 'strokeMode', 'visible', 'clip', 'hideOverlap', 'mergeOverlap', ...Object.keys(LIMITS)];
+  const layerKeys = ['id', 'type', 'mode', 'color', 'strokeMode', 'visible', 'clip', 'hideOverlap', 'mergeOverlap', 'curves', ...Object.keys(LIMITS)];
   const layers = data.layers.map(raw => {
-    if (!raw || Object.keys(raw).some(key => !layerKeys.includes(key)) || typeof raw.id !== 'string' || !raw.id || ids.has(raw.id) || raw.id.length > 100 || !['shape', 'ruler'].includes(raw.mode) || !Object.hasOwn(raw.mode === 'shape' ? TYPES : RULER_TYPES, raw.type) || !isColor(raw.color) || !['default', 'custom'].includes(raw.strokeMode) || ['visible', 'clip', 'hideOverlap'].some(key => typeof raw[key] !== 'boolean')) throw new Error('レイヤーの形式が正しくありません。');
+    if (!raw || Object.keys(raw).some(key => !layerKeys.includes(key)) || typeof raw.id !== 'string' || !raw.id || ids.has(raw.id) || raw.id.length > 100 || !['shape', 'ruler', 'freehand'].includes(raw.mode) || !(raw.mode === 'freehand' ? raw.type === 'freehand' : Object.hasOwn(raw.mode === 'shape' ? TYPES : RULER_TYPES, raw.type)) || !isColor(raw.color) || !['default', 'custom'].includes(raw.strokeMode) || ['visible', 'clip', 'hideOverlap'].some(key => typeof raw[key] !== 'boolean')) throw new Error('レイヤーの形式が正しくありません。');
+    if (raw.mode === 'freehand') {
+      if (!Array.isArray(raw.curves) || raw.curves.length < 4 || raw.curves.length > 3073 || raw.curves.length % 3 !== 1 || raw.curves.some(p => !Array.isArray(p) || p.length !== 2 || p.some(n => !Number.isFinite(n) || Math.abs(n) > 4))) throw new Error('自由曲線の形式が正しくありません。');
+    } else if (Object.hasOwn(raw, 'curves')) throw new Error('自由曲線以外に制御点は指定できません。');
     if (![false, true, 'clockwise', 'counterclockwise'].includes(raw.mergeOverlap)) throw new Error('同レイヤーとの重なりの設定が正しくありません。');
     ids.add(raw.id);
     for (const [key, [min, max]] of Object.entries(LIMITS)) {
@@ -294,5 +315,85 @@ function validateDocument(data) {
   return { version: 1, globalColor: data.globalColor, globalWidth: data.globalWidth, backgroundColor: data.backgroundColor, layers };
 }
 
-globalThis.CircleGeometry = Object.freeze({ TYPES, RULER_TYPES, LIMITS, SHAPE_DEFAULTS, shapeDefaults, point, outline, sector, mergedOutline, resolveStroke, renderArtwork, outlinePoints, fitToSector, snapPosition, snapAngle, createDocument, validateDocument });
+function cubicPoint(p, t) {
+  const u = 1 - t;
+  return [0, 1].map(k => u ** 3 * p[0][k] + 3 * u * u * t * p[1][k] + 3 * u * t * t * p[2][k] + t ** 3 * p[3][k]);
+}
+// Uniform arc-length samples make smoothing independent of pointer speed.
+// Reflected endpoints keep the stroke ends fixed without flattening their tangent.
+function smoothStroke(input, radius) {
+  const lengths = [0];
+  for (let i = 1; i < input.length; i++) lengths.push(lengths.at(-1) + Math.hypot(input[i][0] - input[i - 1][0], input[i][1] - input[i - 1][1]));
+  const length = lengths.at(-1);
+  if (!length || input.length < 3) return input;
+  const count = Math.max(2, Math.min(1024, Math.ceil(length / 2))), step = length / count;
+  let index = 1;
+  const samples = Array.from({ length: count + 1 }, (_, i) => {
+    const distance = i * step;
+    while (index < input.length - 1 && lengths[index] < distance) index++;
+    const t = (distance - lengths[index - 1]) / (lengths[index] - lengths[index - 1]);
+    return input[index - 1].map((n, k) => n + (input[index][k] - n) * t);
+  });
+  const sigma = Math.min(radius, length / 8), reach = Math.min(count, Math.ceil(3 * sigma / step));
+  const weights = Array.from({ length: reach + 1 }, (_, i) => Math.exp(-.5 * (i * step / sigma) ** 2));
+  return samples.map((p, i) => {
+    if (i === 0 || i === count) return input[i === 0 ? 0 : input.length - 1];
+    const sum = [0, 0]; let total = 0;
+    for (let offset = -reach; offset <= reach; offset++) {
+      const j = i + offset, weight = weights[Math.abs(offset)];
+      const q = j < 0 ? samples[-j].map((n, k) => 2 * samples[0][k] - n)
+        : j > count ? samples[2 * count - j].map((n, k) => 2 * samples[count][k] - n) : samples[j];
+      sum[0] += q[0] * weight; sum[1] += q[1] * weight; total += weight;
+    }
+    return sum.map(n => n / total);
+  });
+}
+// Chord-parameterized least-squares cubics; split at the largest error.
+// Shared endpoint tangents keep adjacent segments smooth without dependencies.
+function fitFreehand(input, tolerance = 1.5, smoothing = 0) {
+  let points = input.filter((p, i) => i === 0 || Math.hypot(p[0] - input[i - 1][0], p[1] - input[i - 1][1]) > .001);
+  if (points.length < 2) return null;
+  if (smoothing > 0) points = smoothStroke(points, smoothing);
+  const unit = (a, b) => { const d = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; return [(b[0] - a[0]) / d, (b[1] - a[1]) / d]; };
+  const tangents = points.map((p, i) => unit(points[Math.max(0, i - 1)], points[Math.min(points.length - 1, i + 1)]));
+  const curves = [points[0]];
+  const pending = [[0, points.length - 1]];
+  while (pending.length) {
+    const [first, last] = pending.pop(), a = points[first], b = points[last], left = tangents[first], right = tangents[last];
+    const times = [0];
+    for (let i = first + 1; i <= last; i++) times.push(times.at(-1) + Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]));
+    const length = times.at(-1);
+    let c00 = 0, c01 = 0, c11 = 0, x0 = 0, x1 = 0;
+    for (let i = 0; i < times.length; i++) {
+      const t = times[i] / length, u = 1 - t, b1 = 3 * u * u * t, b2 = 3 * u * t * t;
+      times[i] = t;
+      for (let k = 0; k < 2; k++) {
+        const v0 = left[k] * b1, v1 = -right[k] * b2;
+        const residual = points[first + i][k] - a[k] * (u ** 3 + b1) - b[k] * (t ** 3 + b2);
+        c00 += v0 * v0; c01 += v0 * v1; c11 += v1 * v1; x0 += v0 * residual; x1 += v1 * residual;
+      }
+    }
+    const det = c00 * c11 - c01 * c01;
+    let alpha = det > 1e-10 ? (x0 * c11 - x1 * c01) / det : length / 3;
+    let beta = det > 1e-10 ? (x1 * c00 - x0 * c01) / det : length / 3;
+    if (alpha < .001 || beta < .001 || alpha > length || beta > length) alpha = beta = length / 3;
+    const segment = [a, a.map((n, k) => n + left[k] * alpha), b.map((n, k) => n - right[k] * beta), b];
+    let error = tolerance, split = -1;
+    for (let i = 1; i < times.length - 1; i++) {
+      const q = cubicPoint(segment, times[i]);
+      const distance = Math.hypot(q[0] - points[first + i][0], q[1] - points[first + i][1]);
+      if (distance > error) { error = distance; split = first + i; }
+    }
+    if (split !== -1) pending.push([split, last], [first, split]);
+    else curves.push(...segment.slice(1));
+  }
+  const xs = curves.map(p => p[0]), ys = curves.map(p => p[1]);
+  const x = Math.max(-400, Math.min(400, (Math.min(...xs) + Math.max(...xs)) / 2));
+  const y = Math.max(-400, Math.min(400, (Math.min(...ys) + Math.max(...ys)) / 2));
+  const rx = Math.max(1, Math.min(380, (Math.max(...xs) - Math.min(...xs)) / 2));
+  const ry = Math.max(1, Math.min(380, (Math.max(...ys) - Math.min(...ys)) / 2));
+  return { mode: 'freehand', type: 'freehand', x, y, rx, ry, rotation: 0, curves: curves.map(p => [(p[0] - x) / rx, (p[1] - y) / ry]) };
+}
+
+globalThis.CircleGeometry = Object.freeze({ TYPES, RULER_TYPES, LIMITS, SHAPE_DEFAULTS, shapeDefaults, point, outline, sector, mergedOutline, resolveStroke, renderArtwork, outlinePoints, fitToSector, snapPosition, snapAngle, createDocument, validateDocument, fitFreehand });
 })();
