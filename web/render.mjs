@@ -22,7 +22,7 @@ function render(recipe) {
     try {
       if (!isObject(spec)) throw new Error('図形はオブジェクトで指定してください。');
       const type = spec.type === undefined ? 'circle' : spec.type;
-      const mode = type === 'freehand' ? 'freehand' : Object.hasOwn(G.RULER_TYPES, type) ? 'ruler' : 'shape';
+      const mode = type === 'text' ? 'text' : type === 'freehand' ? 'freehand' : Object.hasOwn(G.RULER_TYPES, type) ? 'ruler' : 'shape';
       const layer = {
         id: randomUUID(), mode, type,
         strokeMode: Object.hasOwn(spec, 'color') || Object.hasOwn(spec, 'width') ? 'custom' : 'default',
@@ -33,6 +33,7 @@ function render(recipe) {
         ...G.SHAPE_DEFAULTS
       };
       if (mode === 'shape') Object.assign(layer, G.shapeDefaults({ ...layer, ...spec }, type));
+      if (mode === 'text') Object.assign(layer, G.TEXT_DEFAULTS, { rx: 310, ry: 310 });
       Object.assign(layer, spec);
       G.validateDocument(G.createDocument([layer]));
       return layer;

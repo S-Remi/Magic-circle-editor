@@ -22,8 +22,8 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .panel-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 h2{font-size:15px;margin:0}
 .badge{border:1px solid var(--line);border-radius:3px;color:var(--muted);padding:0 5px;font-size:12px}
-.add-actions{display:flex;gap:6px;margin-bottom:10px}
-.add-actions button{flex:1}
+.add-actions{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.add-actions button{flex:1 0 45%}
 .layer-list{display:flex;flex-direction:column;gap:4px;flex:1;min-height:120px;overflow:auto}
 .layer-row{display:flex;align-items:center;border:1px solid transparent;border-radius:4px;background:#f5f7f8;flex-shrink:0}
 .layer-row.selected{background:#e6f5fa;border-color:#007a9e;box-shadow:inset 3px 0 #007a9e}
@@ -82,7 +82,7 @@ dialog .primary{width:100%;margin-top:12px}
 @media(min-width:1500px){.workspace{grid-template-columns:240px 1fr 300px}}
 @media(max-width:1000px){.workspace{grid-template-columns:180px minmax(250px,1fr) 264px}.layers-panel,.properties-panel{padding:10px}}
 @media(max-width:740px){body{height:auto;min-height:100dvh}.global-style{order:3;width:100%;gap:8px}.app-header{gap:6px;}.workspace{height:auto;min-height:0;grid-template-columns:150px minmax(0,1fr)}.layers-panel{grid-row:2;border-top:1px solid var(--line)}.properties-panel{grid-row:2;border-top:1px solid var(--line)}.canvas-panel{grid-column:1/-1;height:min(72dvh,calc(100vw + 65px));min-height:300px}.canvas-toolbar{padding:3px 8px}.canvas-controls{padding:0 8px 3px;gap:8px}#canvas-wrap{padding:0 6px 4px}.layer-list{flex:0 1 auto;max-height:65vh}.layer-select{padding:3px;gap:3px}.layer-icon{font-size:19px;width:19px}.visibility{padding:3px}.add-actions{gap:4px}.add-actions button{padding:3px 4px}.layer-tools{flex-wrap:wrap}.layer-tools button{flex:1 0 40%}.panel-bottom{margin-top:8px}.field-pair{gap:6px}}
-@media(max-width:440px){.brand{display:none}.app-header{padding:5px 6px}.file-actions{margin-left:0;gap:5px}.workspace{grid-template-columns:140px minmax(0,1fr)}.layers-panel,.properties-panel{padding:8px}.layer-text small{font-size:12px}.add-actions{flex-direction:column}}
+@media(max-width:440px){.brand{display:none}.app-header{padding:5px 6px}.file-actions{margin-left:0;gap:5px}.workspace{grid-template-columns:140px minmax(0,1fr)}.layers-panel,.properties-panel{padding:8px}.layer-text small{font-size:12px}.add-actions{flex-direction:column;flex-wrap:nowrap}.add-actions button{flex:none}}
 @media(pointer:coarse){button{min-height:32px}.field input,.field select{min-height:32px}.field input[type=color]{height:32px}.toggle{min-height:28px}}
 
 @media(max-width:370px){.field-pair{grid-template-columns:1fr}}

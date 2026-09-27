@@ -21,6 +21,18 @@ function workspace(t) {
   };
 }
 
+test('CLI exports new shapes and editable curved text together', t => {
+  const w = workspace(t);
+  const result = w.run([{ type: 'petal' }, { type: 'clover' }, { type: 'spade' }, { type: 'text', text: '光 & 星', fontSize: 32 }]);
+  assert.equal(result.status, 0, result.stderr);
+  const doc = globalThis.CircleGeometry.validateDocument(JSON.parse(w.read('magic-circle.json')));
+  assert.equal(doc.layers[3].mode, 'text');
+  assert.equal(doc.layers[3].rx, 310);
+  assert.equal(doc.layers[3].text, '光 & 星');
+  assert.match(w.read('magic-circle.svg'), /光 &amp; 星/);
+  assert.match(w.read('magic-circle.svg'), /font-size="32"/);
+});
+
 test('CLI writes editable freehand cubics with rotational copies', t => {
   const w = workspace(t);
   const curves = [[0, -1], [1, -1], [-1, 1], [0, 1]];

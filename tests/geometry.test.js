@@ -4,6 +4,53 @@ import '../web/geometry.js';
 const { point, outline, renderArtwork, outlinePoints, fitToSector, snapPosition, snapAngle, createDocument, validateDocument } = globalThis.CircleGeometry;
 const layer = { id: 'test', strokeMode: 'custom', crescentDepth: 55, arcAngle: 90, hideOverlap: false, mergeOverlap: false, mode: 'shape', type: 'circle', divisions: 6, width: 1, x: 0, y: -100, rx: 50, ry: 30, rotation: 0, phase: 0, sides: 6, sharpness: 2, start: 0, end: 75, color: '#d6ba7d', clip: false, visible: true };
 
+test('petal, clover and spade have closed symmetric contours and round-trip', () => {
+  for (const type of ['petal', 'clover', 'spade']) {
+    const shape = { ...layer, ...globalThis.CircleGeometry.shapeDefaults(layer, type), x: 0, y: 0 };
+    assert.deepEqual(validateDocument(createDocument([shape])).layers[0], shape);
+    assert.match(outline(shape), / Z$/);
+    for (let i = 0; i <= 720; i++) {
+      const p = point(shape, i / 720), q = point(shape, 1 - i / 720);
+      assert.ok(p.every(Number.isFinite));
+      assert.ok(Math.abs(p[0] + q[0]) < 1e-8 && Math.abs(p[1] - q[1]) < 1e-8);
+    }
+    assert.doesNotMatch(renderArtwork([{ ...shape, mergeOverlap: true }]), /NaN|Infinity/);
+  }
+  const petal = { ...layer, type: 'petal', x: 0, y: 0, rx: 1, ry: 1 };
+  assert.ok(point(petal, 0)[1] > point(petal, .25)[1]);
+  assert.deepEqual(point({ ...petal, type: 'spade' }, 0), [0, -1]);
+});
+
+test('text preserves Unicode, escapes SVG markup and composes with masks and repeats', () => {
+  const text = { ...layer, ...globalThis.CircleGeometry.TEXT_DEFAULTS, mode: 'text', type: 'text', text: '桜 & <script> "光" 🌙', clip: true };
+  assert.deepEqual(validateDocument(JSON.parse(JSON.stringify(createDocument([text])))).layers[0], text);
+  const svg = renderArtwork([text]);
+  assert.match(svg, /桜 &amp; &lt;script&gt; &quot;光&quot; 🌙/);
+  assert.doesNotMatch(svg, /<script>/);
+  assert.equal((svg.match(/clip-path=/g) || []).length, text.divisions);
+  assert.match(svg, /startOffset="50%"/);
+  assert.match(svg, /A50 50/);
+  assert.match(renderArtwork([{ ...text, textLayout: 'straight' }]), /M-50 0 H50/);
+  assert.match(renderArtwork([{ ...text, hideOverlap: true }, { ...text, id: 'upper' }]), /stroke="black" color="black"/);
+  assert.match(renderArtwork([text], 'selection', { id: text.id, color: '#00a2cf' }), /color="#00a2cf"/);
+  assert.ok(outlinePoints(text).every(p => p.every(Number.isFinite)));
+});
+
+test('text validates only its own fields and rejects unsafe or malformed settings', () => {
+  const text = { ...layer, ...globalThis.CircleGeometry.TEXT_DEFAULTS, mode: 'text', type: 'text' };
+  for (const patch of [
+    { text: null }, { text: 'a'.repeat(501) }, { text: '\u0000' },
+    { fontFamily: 'serif" onload="alert(1)' }, { textLayout: 'unknown' },
+    { fontSize: 0 }, { fontSize: Infinity }, { letterSpacing: -1 }, { mergeOverlap: true }
+  ]) assert.throws(() => validateDocument(createDocument([{ ...text, ...patch }])));
+  for (const key of Object.keys(globalThis.CircleGeometry.TEXT_DEFAULTS)) {
+    const incomplete = { ...text }; delete incomplete[key];
+    assert.throws(() => validateDocument(createDocument([incomplete])));
+  }
+  assert.throws(() => validateDocument(createDocument([{ ...layer, text: 'wrong mode' }])));
+  assert.doesNotThrow(() => validateDocument(createDocument([layer])));
+});
+
 test('freehand fitting preserves endpoints and approximates curved strokes with few cubics', () => {
   const points = Array.from({ length: 301 }, (_, i) => [i - 150, 55 * Math.sin(i / 35) - 120]);
   const fitted = { ...layer, ...globalThis.CircleGeometry.fitFreehand(points) };
