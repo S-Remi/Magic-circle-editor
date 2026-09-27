@@ -67,6 +67,41 @@ test('directional overlap repeats the same silhouette around the full ring at ev
     }
   }
 });
+test('offset leaf overlaps have no exposed rear tips or isolated triangular outlines', () => {
+  for (const mergeOverlap of ['clockwise', 'counterclockwise']) for (const phase of [0, 23, 180]) {
+    // Reproduction supplied with the reported protruding tip and six triangles.
+    const input = { ...layer, type: 'leaf', x: 13.9, y: -44.8, rx: 45.5, ry: 110.3,
+      divisions: 6, rotation: 0, width: 1.5, phase, mergeOverlap };
+    const edges = segments(globalThis.CircleGeometry.mergedOutline(input, true));
+    const nodes = [], buckets = new Map(), cell = .001;
+    const nodeAt = (x, y) => {
+      const cx = Math.floor(x / cell), cy = Math.floor(y / cell);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+        for (const node of buckets.get([cx + dx, cy + dy].join(',')) || []) {
+          if (Math.hypot(node.x - x, node.y - y) < .00003) return node;
+        }
+      }
+      const node = { x, y, adjacent: new Set() }, key = [cx, cy].join(',');
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(node); nodes.push(node);
+      return node;
+    };
+    for (const [ax, ay, bx, by] of edges) {
+      const a = nodeAt(ax, ay), b = nodeAt(bx, by);
+      if (a !== b) { a.adjacent.add(b); b.adjacent.add(a); }
+    }
+    assert.ok(nodes.length > 0);
+    for (const node of nodes) assert.ok(node.adjacent.size >= 2,
+      JSON.stringify({ mergeOverlap, phase, dangling: [node.x, node.y] }));
+    const visited = new Set(), pending = [nodes[0]];
+    while (pending.length) {
+      const node = pending.pop();
+      if (visited.has(node)) continue;
+      visited.add(node); pending.push(...node.adjacent);
+    }
+    assert.equal(visited.size, nodes.length, `${mergeOverlap}/${phase}: isolated interior outlines`);
+  }
+});
 test('directional rendering shares boundaries with selection and composes with upper masks', () => {
   const input = { ...layer, mergeOverlap: 'clockwise', divisions: 6, rx: 100, y: -60 };
   const path = globalThis.CircleGeometry.mergedOutline(input, true);

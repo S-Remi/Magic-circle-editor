@@ -138,12 +138,13 @@ function mergedOutline(layer, stacked = false) {
     const covered = new Set(covering.map(p => p.copy));
     const ends = covering.filter(p => !covered.has((p.copy + 1) % layer.divisions));
     if (ends.length === 1) return ends[0].copy;
-    // Disconnected runs (possible with concave shapes) use a local angular
-    // tie-break that rotates with the artwork instead of a fixed copy index.
+    // Long rear tips can form disconnected runs even for convex leaves.
+    // Prefer the end facing this point. A wrapped directional angle jumps at
+    // zero and can incorrectly expose an opposite tip as a separate triangle.
     const direction = layer.mergeOverlap === 'counterclockwise' ? -1 : 1;
     const a = Math.atan2(y, x) * 180 / Math.PI;
     ends.sort((p, q) => {
-      const rank = copy => ((direction * (a - layer.phase - Math.atan2(layer.y, layer.x) * 180 / Math.PI) - copy * 360 / layer.divisions) % 360 + 360) % 360;
+      const rank = copy => -Math.cos((direction * (a - layer.phase - Math.atan2(layer.y, layer.x) * 180 / Math.PI) - copy * 360 / layer.divisions) * Math.PI / 180);
       return rank(p.copy) - rank(q.copy);
     });
     return ends[0]?.copy ?? 'center';
