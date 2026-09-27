@@ -21,6 +21,19 @@ function workspace(t) {
   };
 }
 
+test('CLI writes editable freehand cubics with rotational copies', t => {
+  const w = workspace(t);
+  const curves = [[0, -1], [1, -1], [-1, 1], [0, 1]];
+  const result = w.run([{ type: 'freehand', curves, divisions: 8, y: -120, rx: 30, ry: 60 }]);
+  assert.equal(result.status, 0, result.stderr);
+  const doc = globalThis.CircleGeometry.validateDocument(JSON.parse(w.read('magic-circle.json')));
+  assert.equal(doc.layers[0].mode, 'freehand');
+  assert.deepEqual(doc.layers[0].curves, curves);
+  const svg = w.read('magic-circle.svg');
+  assert.match(svg, /d="M0.000 -180.000 C30.000 -180.000 -30.000 -60.000 0.000 -60.000"/);
+  assert.equal((svg.match(/<g transform="rotate/g) || []).length, 8);
+});
+
 test('standalone CLI creates editor-compatible JSON and SVG from a short recipe', t => {
   const w = workspace(t);
   const result = w.run([{ type: 'circle', rx: 320 }, { type: 'crescent', y: -220, rx: 30, divisions: 8 }, { type: 'star', rx: 100 }]);
