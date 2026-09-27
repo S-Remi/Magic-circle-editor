@@ -1,12 +1,14 @@
 (() => {
 'use strict';
-const TYPES = { circle: '円', ellipse: '楕円', leaf: '葉形楕円', drop: '水滴', heart: 'ハート', crescent: '三日月', fan: '扇形', polygon: '正多角形', star: '星形', pointed: 'ダイヤ/尖り楕円' };
+const TYPES = { circle: '円', ellipse: '楕円', leaf: '葉形楕円', drop: '水滴', heart: 'ハート', petal: '桜の花びら', clover: 'クラブ（クローバー）', spade: 'スペード', crescent: '三日月', fan: '扇形', polygon: '正多角形', star: '星形', pointed: 'ダイヤ/尖り楕円' };
+const TEXT_DEFAULTS = { text: 'MAGIC CIRCLE', textLayout: 'arc', fontFamily: 'serif', fontSize: 24, letterSpacing: 3 };
+const TEXT_LIMITS = { fontSize: [4, 120], letterSpacing: [0, 40] };
 const RULER_TYPES = { line: '直線', curve: '曲線' };
 const SHAPE_DEFAULTS = { crescentDepth: 55, arcAngle: 90 };
 const LIMITS = { crescentDepth: [0, 95], arcAngle: [1, 360], divisions: [1, 64], width: [.25, 20], x: [-400, 400], y: [-400, 400], rx: [1, 380], ry: [1, 380], rotation: [-360, 360], phase: [-360, 360], sides: [3, 32], sharpness: [.15, 4], start: [0, 100], end: [0, 100] };
 const SHAPE_PRESETS = Object.freeze({
   circle: { ratio: 1 }, ellipse: { ratio: 1.4 }, leaf: { ratio: 1.6 },
-  drop: { ratio: 1.4 }, heart: { ratio: 1.2 }, crescent: { ratio: 1 },
+  drop: { ratio: 1.4 }, heart: { ratio: 1.2 }, petal: { ratio: 1.5 }, clover: { ratio: 1 }, spade: { ratio: 1.2 }, crescent: { ratio: 1 },
   fan: { ratio: 1 }, polygon: { ratio: 1 }, star: { ratio: 1 }, pointed: { ratio: 1.5 }
 });
 function shapeDefaults(layer, type) {
@@ -65,6 +67,35 @@ function point(layer, t) {
     const u = t * Math.PI * 2;
     x = Math.sin(u) ** 3 * layer.rx;
     y = -(13 * Math.cos(u) - 5 * Math.cos(2 * u) - 2 * Math.cos(3 * u) - Math.cos(4 * u)) / 17 * layer.ry;
+  } else if (['petal', 'clover', 'spade'].includes(layer.type)) {
+    // Closed cubic contours preserve the petal notch and the suit stems.
+    const curves = layer.type === 'petal' ? [
+      [0, -.65], [.15, -.8], [.28, -1], [.38, -1],
+      [1.3, -.8], [1, .3], [0, 1],
+      [-1, .3], [-1.3, -.8], [-.38, -1],
+      [-.28, -1], [-.15, -.8], [0, -.65]
+    ] : layer.type === 'clover' ? [
+      [0, -1], [.55, -1], [.68, -.48], [.32, -.25],
+      [.65, -.55], [1, -.3], [1, .12],
+      [1, .65], [.4, .82], [.12, .42],
+      [.1, .68], [.2, .85], [.4, 1],
+      [.15, 1], [-.15, 1], [-.4, 1],
+      [-.2, .85], [-.1, .68], [-.12, .42],
+      [-.4, .82], [-1, .65], [-1, .12],
+      [-1, -.3], [-.65, -.55], [-.32, -.25],
+      [-.68, -.48], [-.55, -1], [0, -1]
+    ] : [
+      [0, -1], [.25, -.55], [1.2, -.2], [.9, .35],
+      [.7, .7], [.25, .65], [.12, .4],
+      [.1, .65], [.2, .85], [.4, 1],
+      [.15, 1], [-.15, 1], [-.4, 1],
+      [-.2, .85], [-.1, .65], [-.12, .4],
+      [-.25, .65], [-.7, .7], [-.9, .35],
+      [-1.2, -.2], [-.25, -.55], [0, -1]
+    ];
+    const count = (curves.length - 1) / 3, at = ((t % 1 + 1) % 1) * count, index = Math.floor(at);
+    const p = cubicPoint(curves.slice(index * 3, index * 3 + 4), at - index);
+    x = p[0] * layer.rx; y = p[1] * layer.ry;
   } else if (layer.type === 'leaf') {
     // Two parabolic sides meet at the top and bottom tips.
     x = Math.sign(Math.cos(angle)) * Math.cos(angle) ** 2 * layer.rx;
@@ -214,22 +245,37 @@ function mergedPath(layer) {
 function resolveStroke(layer, document) {
   return layer.strokeMode === 'default' ? { ...layer, color: document.globalColor, width: document.globalWidth } : layer;
 }
+function textMarkup(layer, id) {
+  const escapeText = value => value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c]);
+  const r = layer.rx;
+  const path = layer.textLayout === 'arc'
+    ? `M0 ${r} A${r} ${r} 0 1 1 0 ${-r} A${r} ${r} 0 1 1 0 ${r}`
+    : `M${-r} 0 H${r}`;
+  return `<path id="${id}-baseline" d="${path}"/><g id="${id}" transform="translate(${layer.x} ${layer.y}) rotate(${layer.rotation})"><text fill="currentColor" stroke="none" font-family="${layer.fontFamily}" font-size="${layer.fontSize}" letter-spacing="${layer.letterSpacing}" text-anchor="middle" xml:space="preserve"><textPath href="#${id}-baseline" xlink:href="#${id}-baseline" startOffset="50%">${escapeText(layer.text)}</textPath></text></g>`;
+}
 function renderArtwork(layers, prefix = 'artwork', selection = null) {
   const visible = layers.filter(l => l.visible);
   const repeat = (l, index, content) => Array.from({ length: l.divisions }, (_, i) => `<g transform="rotate(${l.phase + i * 360 / l.divisions})"><g${l.clip && l.divisions > 1 ? ` clip-path="url(#${prefix}-sector-${index})"` : ''}>${content}</g></g>`).join('');
-  const defs = visible.map((l, index) => `<path id="${prefix}-outline-${index}" d="${outline(l)}"/>${l.clip && l.divisions > 1 ? `<clipPath id="${prefix}-sector-${index}"><path d="${sector(l.divisions)}"/></clipPath>` : ''}`).join('');
+  const defs = visible.map((l, index) => `${l.mode === 'text' ? textMarkup(l, `${prefix}-outline-${index}`) : `<path id="${prefix}-outline-${index}" d="${outline(l)}"/>`}${l.clip && l.divisions > 1 ? `<clipPath id="${prefix}-sector-${index}"><path d="${sector(l.divisions)}"/></clipPath>` : ''}`).join('');
   const artwork = visible.map((l, index) => {
     if (selection && l.id !== selection.id) return '';
     const upper = l.hideOverlap ? visible.slice(index + 1) : [];
-    const mask = upper.length ? `<mask id="${prefix}-overlap-${index}" maskUnits="userSpaceOnUse" x="-400" y="-400" width="800" height="800" style="mask-type:luminance"><rect x="-400" y="-400" width="800" height="800" fill="white"/>${upper.map((top, offset) => `<g fill="${top.mode === 'shape' ? 'black' : 'none'}" stroke="black" stroke-width="${top.width}" stroke-linejoin="round" stroke-linecap="round">${repeat(top, index + 1 + offset, `<use href="#${prefix}-outline-${index + 1 + offset}" xlink:href="#${prefix}-outline-${index + 1 + offset}"/>`)}</g>`).join('')}</mask>` : '';
+    const mask = upper.length ? `<mask id="${prefix}-overlap-${index}" maskUnits="userSpaceOnUse" x="-400" y="-400" width="800" height="800" style="mask-type:luminance"><rect x="-400" y="-400" width="800" height="800" fill="white"/>${upper.map((top, offset) => `<g fill="${top.mode === 'shape' ? 'black' : 'none'}" stroke="black" color="black" stroke-width="${top.width}" stroke-linejoin="round" stroke-linecap="round">${repeat(top, index + 1 + offset, `<use href="#${prefix}-outline-${index + 1 + offset}" xlink:href="#${prefix}-outline-${index + 1 + offset}"/>`)}</g>`).join('')}</mask>` : '';
     const sameOverlap = l.mergeOverlap && l.mode === 'shape' && l.divisions > 1 && !l.clip;
     const content = sameOverlap ? `<path d="${mergedPath(l)}"/>` : repeat(l, index, `<use href="#${prefix}-outline-${index}" xlink:href="#${prefix}-outline-${index}"/>`);
-    return `${mask}<g${mask ? ` mask="url(#${prefix}-overlap-${index})"` : ''} fill="none" stroke="${selection?.color || l.color}" stroke-width="${selection?.width ?? l.width}" stroke-linejoin="round" stroke-linecap="round">${content}</g>`;
+    return `${mask}<g${mask ? ` mask="url(#${prefix}-overlap-${index})"` : ''} color="${selection?.color || l.color}" fill="none" stroke="${selection?.color || l.color}" stroke-width="${selection?.width ?? l.width}" stroke-linejoin="round" stroke-linecap="round">${content}</g>`;
   }).join('');
   return `<defs>${defs}</defs>${artwork}`;
 }
 // Use the same vertices as the rendered outline, including exact polygon corners.
 function outlinePoints(layer) {
+  if (layer.mode === 'text') {
+    // Conservative font-independent bounds include glyph ascent and descent.
+    const r = layer.rx + layer.fontSize * 2;
+    if (layer.textLayout === 'arc') return Array.from({ length: 720 }, (_, i) => [r * Math.cos(i * Math.PI / 360), r * Math.sin(i * Math.PI / 360)]);
+    const a = layer.rotation * Math.PI / 180;
+    return [[-r, -layer.fontSize * 2], [r, -layer.fontSize * 2], [r, layer.fontSize], [-r, layer.fontSize]].map(([x, y]) => [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a)]);
+  }
   // Control hulls conservatively bound Bezier curves for fitting and snapping.
   if (layer.mode === 'freehand') {
     const a = layer.rotation * Math.PI / 180;
@@ -299,13 +345,19 @@ function validateDocument(data) {
   if (!isColor(data.globalColor) || !isColor(data.backgroundColor)) throw new Error('全体の色の形式が正しくありません。');
   if (!Number.isFinite(data.globalWidth) || data.globalWidth < LIMITS.width[0] || data.globalWidth > LIMITS.width[1]) throw new Error('全体の太さが有効範囲を超えています。');
   const ids = new Set();
-  const layerKeys = ['id', 'type', 'mode', 'color', 'strokeMode', 'visible', 'clip', 'hideOverlap', 'mergeOverlap', 'curves', ...Object.keys(LIMITS)];
+  const layerKeys = ['id', 'type', 'mode', 'color', 'strokeMode', 'visible', 'clip', 'hideOverlap', 'mergeOverlap', 'curves', ...Object.keys(TEXT_DEFAULTS), ...Object.keys(LIMITS)];
   const layers = data.layers.map(raw => {
-    if (!raw || Object.keys(raw).some(key => !layerKeys.includes(key)) || typeof raw.id !== 'string' || !raw.id || ids.has(raw.id) || raw.id.length > 100 || !['shape', 'ruler', 'freehand'].includes(raw.mode) || !(raw.mode === 'freehand' ? raw.type === 'freehand' : Object.hasOwn(raw.mode === 'shape' ? TYPES : RULER_TYPES, raw.type)) || !isColor(raw.color) || !['default', 'custom'].includes(raw.strokeMode) || ['visible', 'clip', 'hideOverlap'].some(key => typeof raw[key] !== 'boolean')) throw new Error('レイヤーの形式が正しくありません。');
+    if (!raw || Object.keys(raw).some(key => !layerKeys.includes(key)) || typeof raw.id !== 'string' || !raw.id || ids.has(raw.id) || raw.id.length > 100 || !['shape', 'ruler', 'freehand', 'text'].includes(raw.mode) || !(raw.mode === 'text' ? raw.type === 'text' : raw.mode === 'freehand' ? raw.type === 'freehand' : Object.hasOwn(raw.mode === 'shape' ? TYPES : RULER_TYPES, raw.type)) || !isColor(raw.color) || !['default', 'custom'].includes(raw.strokeMode) || ['visible', 'clip', 'hideOverlap'].some(key => typeof raw[key] !== 'boolean')) throw new Error('レイヤーの形式が正しくありません。');
     if (raw.mode === 'freehand') {
       if (!Array.isArray(raw.curves) || raw.curves.length < 4 || raw.curves.length > 3073 || raw.curves.length % 3 !== 1 || raw.curves.some(p => !Array.isArray(p) || p.length !== 2 || p.some(n => !Number.isFinite(n) || Math.abs(n) > 4))) throw new Error('自由曲線の形式が正しくありません。');
     } else if (Object.hasOwn(raw, 'curves')) throw new Error('自由曲線以外に制御点は指定できません。');
     if (![false, true, 'clockwise', 'counterclockwise'].includes(raw.mergeOverlap)) throw new Error('同レイヤーとの重なりの設定が正しくありません。');
+    if (raw.mode === 'text') {
+      if (typeof raw.text !== 'string' || raw.text.length > 500 || /[\u0000-\u001f\u007f]/u.test(raw.text) || !['arc', 'straight'].includes(raw.textLayout) || !['serif', 'sans-serif', 'monospace'].includes(raw.fontFamily) || raw.mergeOverlap !== false) throw new Error('テキストの形式が正しくありません。');
+      for (const [key, [min, max]] of Object.entries(TEXT_LIMITS)) {
+        if (!Number.isFinite(raw[key]) || raw[key] < min || raw[key] > max) throw new Error('文字サイズ・字間が有効範囲を超えています。');
+      }
+    } else if (Object.keys(TEXT_DEFAULTS).some(key => Object.hasOwn(raw, key))) throw new Error('テキスト以外に文字設定は指定できません。');
     ids.add(raw.id);
     for (const [key, [min, max]] of Object.entries(LIMITS)) {
       if (!Number.isFinite(raw[key]) || raw[key] < min || raw[key] > max || (['sides', 'divisions'].includes(key) && !Number.isInteger(raw[key]))) throw new Error('数値が有効範囲を超えています。');
@@ -395,5 +447,5 @@ function fitFreehand(input, tolerance = 1.5, smoothing = 0) {
   return { mode: 'freehand', type: 'freehand', x, y, rx, ry, rotation: 0, curves: curves.map(p => [(p[0] - x) / rx, (p[1] - y) / ry]) };
 }
 
-globalThis.CircleGeometry = Object.freeze({ TYPES, RULER_TYPES, LIMITS, SHAPE_DEFAULTS, shapeDefaults, point, outline, sector, mergedOutline, resolveStroke, renderArtwork, outlinePoints, fitToSector, snapPosition, snapAngle, createDocument, validateDocument, fitFreehand });
+globalThis.CircleGeometry = Object.freeze({ TYPES, TEXT_DEFAULTS, TEXT_LIMITS, RULER_TYPES, LIMITS, SHAPE_DEFAULTS, shapeDefaults, point, outline, sector, mergedOutline, resolveStroke, renderArtwork, outlinePoints, fitToSector, snapPosition, snapAngle, createDocument, validateDocument, fitFreehand });
 })();
